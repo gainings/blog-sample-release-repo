@@ -1,0 +1,142 @@
+# 各アプリリポジトリからの repository_dispatch (event_type: deploy) を受けてデプロイする。
+#
+#   params ──> deploy-dev ──> deploy-stg ──> deploy-prod
+#
+# - どの環境にデプロイするかは services/<service>/service.yaml の environments で決まる (未定義の環境はスキップ)
+# - requires_release: true の環境は、payload に release_tag がある時だけデプロイされる
+# - 前段の環境が失敗したら後段には進まない
+#
+# payload:
+#   service:        services/ 配下のディレクトリ名。必須
+#   image_tag:      イメージタグ (sha-<commit sha>)。必須
+#   release_tag:    tagpr が作った CalVer タグ (vYYYY.MMDD.N)。空なら requires_release の環境はスキップ
+#   sha:            アプリ側のコミット SHA (表示用)
+#   source_run_url: アプリ側のワークフロー実行 URL (表示用)
+#
+# workflow_dispatch でも同じ引数で手動実行できる。
+name: Release
+
+run-name: "deploy ${{ github.event.client_payload.service || inputs.service }} ${{ github.event.client_payload.image_tag || inputs.image_tag }} ${{ github.event.client_payload.release_tag || inputs.release_tag }}"
+
+on:
+  repository_dispatch:
+    types: [deploy]
+  workflow_dispatch:
+    inputs:
+      service:
+        description: "Service name (directory under services/)"
+        required: true
+        type: string
+      image_tag:
+        description: "Image tag to deploy (sha-<commit sha>)"
+        required: true
+        type: string
+      release_tag:
+        description: "Release tag (vYYYY.MMDD.N). Set to deploy through to requires_release environments"
+        required: false
+        type: string
+        default: ""
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.event.client_payload.service || inputs.service }}
+  cancel-in-progress: false
+
+jobs:
+  params:
+    name: resolve parameters
+    runs-on: ubuntu-latest
+    outputs:
+      service: ${{ steps.p.outputs.service }}
+      image_tag: ${{ steps.p.outputs.image_tag }}
+      release_tag: ${{ steps.p.outputs.release_tag }}
+      targets: ${{ steps.p.outputs.targets }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: p
+        env:
+          SERVICE: ${{ github.event.client_payload.service || inputs.service }}
+          IMAGE_TAG: ${{ github.event.client_payload.image_tag || inputs.image_tag }}
+          RELEASE_TAG: ${{ github.event.client_payload.release_tag || inputs.release_tag }}
+          SHA: ${{ github.event.client_payload.sha }}
+          SOURCE_RUN_URL: ${{ github.event.client_payload.source_run_url }}
+        run: |
+          set -euo pipefail
+          if [ -z "$SERVICE" ] || [ -z "$IMAGE_TAG" ]; then
+            echo "::error::service and image_tag are required"; exit 1
+          fi
+          m="services/${SERVICE}/service.yaml"
+          if [ ! -f "$m" ]; then
+            echo "::error::unknown service '${SERVICE}' (${m} not found)"; exit 1
+          fi
+
+          # デプロイ対象の環境を dev → stg → prod の順で決める
+          targets=()
+          for env in dev stg prod; do
+            if [ "$(yq ".environments.${env} != null" "$m")" != "true" ]; then
+              continue
+            fi
+            if [ "$(yq ".environments.${env}.requires_release // false" "$m")" = "true" ] && [ -z "$RELEASE_TAG" ]; then
+              echo "skip ${env}: requires_release but no release_tag"
+              continue
+            fi
+            targets+=("$env")
+          done
+          targets_json=$(printf '%s\n' "${targets[@]:-}" | grep -v '^$' | jq -R . | jq -cs .)
+
+          {
+            echo "service=${SERVICE}"
+            echo "image_tag=${IMAGE_TAG}"
+            echo "release_tag=${RELEASE_TAG}"
+            echo "targets=${targets_json}"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## Deploy request"
+            echo "| key | value |"
+            echo "|---|---|"
+            echo "| service | \`${SERVICE}\` (kind: \`$(yq '.kind' "$m")\`) |"
+            echo "| image_tag | \`${IMAGE_TAG}\` |"
+            echo "| release_tag | \`${RELEASE_TAG:-"(none)"}\` |"
+            echo "| targets | \`${targets_json}\` |"
+            echo "| sha | \`${SHA:-"-"}\` |"
+            echo "| source | ${SOURCE_RUN_URL:-"-"} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy-dev:
+    needs: params
+    if: contains(fromJSON(needs.params.outputs.targets), 'dev')
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/deploy.yml
+    with:
+      service: ${{ needs.params.outputs.service }}
+      environment: dev
+      image_tag: ${{ needs.params.outputs.image_tag }}
+
+  deploy-stg:
+    needs: [params, deploy-dev]
+    # 前段がスキップされても進むが、失敗していたら進まない
+    if: ${{ !cancelled() && !failure() && contains(fromJSON(needs.params.outputs.targets), 'stg') }}
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/deploy.yml
+    with:
+      service: ${{ needs.params.outputs.service }}
+      environment: stg
+      image_tag: ${{ needs.params.outputs.image_tag }}
+
+  deploy-prod:
+    needs: [params, deploy-dev, deploy-stg]
+    if: ${{ !cancelled() && !failure() && contains(fromJSON(needs.params.outputs.targets), 'prod') }}
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/deploy.yml
+    with:
+      service: ${{ needs.params.outputs.service }}
+      environment: prod
+      image_tag: ${{ needs.params.outputs.image_tag }}

@@ -1,0 +1,45 @@
+# AWS / GCP に接続せず、全サービス × 全環境でデプロイ定義がレンダリングできることを確認する。
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: m
+        run: |
+          set -euo pipefail
+          matrix=$(
+            for m in services/*/service.yaml; do
+              svc=$(basename "$(dirname "$m")")
+              yq -o=json ".environments | keys | .[] | {\"service\": \"${svc}\", \"env\": .}" "$m"
+            done | jq -cs '{include: .}'
+          )
+          echo "matrix=${matrix}" >> "$GITHUB_OUTPUT"
+          echo "$matrix" | jq .
+
+  render:
+    needs: discover
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
+    name: render ${{ matrix.service }} (${{ matrix.env }})
+    steps:
+      - uses: actions/checkout@v4
+      - uses: kayac/ecspresso@v2
+        with:
+          version: v2.8.5
+      - uses: fujiwara/lambroll@v1
+        with:
+          version: v1.5.3
+      - run: scripts/render.sh "${{ matrix.service }}" "${{ matrix.env }}"

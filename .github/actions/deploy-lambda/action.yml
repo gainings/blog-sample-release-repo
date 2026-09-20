@@ -1,0 +1,45 @@
+name: Deploy to Lambda (lambroll)
+description: services/<service>/lambroll/function.json を lambroll でデプロイする (コンテナイメージ)
+
+inputs:
+  service_dir:
+    required: true
+  environment:
+    required: true
+  image:
+    required: true
+  aws_region:
+    required: true
+  aws_account_id:
+    required: true
+  aws_role_arn:
+    required: true
+  lambroll_version:
+    required: false
+    default: v1.5.3
+
+runs:
+  using: composite
+  steps:
+    - uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ inputs.aws_role_arn }}
+        aws-region: ${{ inputs.aws_region }}
+
+    - uses: fujiwara/lambroll@v1
+      with:
+        version: ${{ inputs.lambroll_version }}
+
+    - name: lambroll diff / deploy
+      shell: bash
+      env:
+        ENV: ${{ inputs.environment }}
+        IMAGE: ${{ inputs.image }}
+        AWS_REGION: ${{ inputs.aws_region }}
+        AWS_ACCOUNT_ID: ${{ inputs.aws_account_id }}
+        FUNCTION: ${{ inputs.service_dir }}/lambroll/function.json
+      run: |
+        set -euo pipefail
+        lambroll diff --function "$FUNCTION" || true
+        # 新しいバージョンを publish し、エイリアス current を付け替える
+        lambroll deploy --function "$FUNCTION"

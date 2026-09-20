@@ -1,0 +1,52 @@
+name: Deploy to ECS (ecspresso)
+description: services/<service>/ecspresso/ の定義を ecspresso でデプロイする
+
+inputs:
+  service_dir:
+    description: サービスのディレクトリ (services/<service>)
+    required: true
+  environment:
+    description: dev | stg | prod
+    required: true
+  image:
+    description: デプロイするイメージ (registry/repository:tag)
+    required: true
+  aws_region:
+    required: true
+  aws_account_id:
+    required: true
+  aws_role_arn:
+    description: OIDC で Assume するデプロイ用ロール
+    required: true
+  ecspresso_version:
+    required: false
+    default: v2.8.5
+
+runs:
+  using: composite
+  steps:
+    - uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ inputs.aws_role_arn }}
+        aws-region: ${{ inputs.aws_region }}
+
+    - uses: kayac/ecspresso@v2
+      with:
+        version: ${{ inputs.ecspresso_version }}
+
+    - name: ecspresso verify / diff / deploy
+      shell: bash
+      env:
+        ENV: ${{ inputs.environment }}
+        IMAGE: ${{ inputs.image }}
+        AWS_REGION: ${{ inputs.aws_region }}
+        AWS_ACCOUNT_ID: ${{ inputs.aws_account_id }}
+        CONFIG: ${{ inputs.service_dir }}/ecspresso/config.yaml
+      run: |
+        set -euo pipefail
+        # イメージの存在、IAM ロール、ロググループ等を事前検証する
+        ecspresso verify --config "$CONFIG"
+        # 現在のタスク定義/サービスとの差分をログに残す
+        ecspresso diff --config "$CONFIG" || true
+        # サービスが安定するまで待つ。失敗時はサーキットブレーカーが前リビジョンへ戻す
+        ecspresso deploy --config "$CONFIG"

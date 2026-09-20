@@ -1,0 +1,37 @@
+{
+  "launchType": "FARGATE",
+  "platformVersion": "LATEST",
+  "desiredCount": {{ env `DESIRED_COUNT` `1` }},
+  "deploymentController": { "type": "ECS" },
+  "deploymentConfiguration": {
+    "deploymentCircuitBreaker": { "enable": true, "rollback": true },
+    "maximumPercent": 200,
+    "minimumHealthyPercent": 100
+  },
+  "healthCheckGracePeriodSeconds": 30,
+  "enableExecuteCommand": true,
+  "loadBalancers": [
+    {
+      "containerName": "app",
+      "containerPort": 8080,
+      "targetGroupArn": "{{ must_env `TARGET_GROUP_ARN` }}"
+    }
+  ],
+  "networkConfiguration": {
+    "awsvpcConfiguration": {
+      "assignPublicIp": "DISABLED",
+      "subnets": [
+        "{{ must_env `SUBNET_ID_1` }}",
+        "{{ must_env `SUBNET_ID_2` }}"
+      ],
+      "securityGroups": [
+        "{{ must_env `SECURITY_GROUP_ID` }}"
+      ]
+    }
+  },
+  "propagateTags": "SERVICE",
+  "tags": [
+    { "key": "Environment", "value": "{{ must_env `ENV` }}" },
+    { "key": "ManagedBy", "value": "ecspresso" }
+  ]
+}

@@ -1,0 +1,30 @@
+# Knative Service 形式。${VAR} は envsubst で置換される (IMAGE, ENV, vars の値)。
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: example-cloudrun-${ENV}
+  labels:
+    environment: ${ENV}
+    managed-by: release-repo
+  annotations:
+    run.googleapis.com/ingress: internal-and-cloud-load-balancing
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "${MIN_INSTANCES}"
+        autoscaling.knative.dev/maxScale: "${MAX_INSTANCES}"
+    spec:
+      containerConcurrency: 80
+      timeoutSeconds: 30
+      containers:
+        - image: ${IMAGE}
+          ports:
+            - containerPort: 8080
+          env:
+            - name: APP_ENV
+              value: ${ENV}
+          resources:
+            limits:
+              cpu: "1"
+              memory: 512Mi

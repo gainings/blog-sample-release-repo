@@ -1,0 +1,29 @@
+# Cloud Run を gcloud run services replace でデプロイする例。
+name: example-cloudrun
+kind: cloudrun
+source: gainings/example-cloudrun-repo
+
+image:
+  registry: asia-northeast1-docker.pkg.dev/example-project-dev/apps
+  repository: example-cloudrun
+
+environments:
+  dev:
+    gcp:
+      project_id: example-project-dev
+      region: asia-northeast1
+      workload_identity_provider: projects/000000000001/locations/global/workloadIdentityPools/github/providers/github
+      service_account: gha-release@example-project-dev.iam.gserviceaccount.com
+    vars:
+      MIN_INSTANCES: "0"
+      MAX_INSTANCES: "2"
+  prod:
+    requires_release: true
+    gcp:
+      project_id: example-project-prod
+      region: asia-northeast1
+      workload_identity_provider: projects/000000000002/locations/global/workloadIdentityPools/github/providers/github
+      service_account: gha-release@example-project-prod.iam.gserviceaccount.com
+    vars:
+      MIN_INSTANCES: "1"
+      MAX_INSTANCES: "10"

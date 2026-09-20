@@ -1,0 +1,50 @@
+name: Deploy to Cloud Run (gcloud)
+description: services/<service>/cloudrun/service.yaml を envsubst で埋めて gcloud run services replace する
+
+inputs:
+  service_dir:
+    required: true
+  environment:
+    required: true
+  image:
+    required: true
+  gcp_project_id:
+    required: true
+  gcp_region:
+    required: true
+  gcp_workload_identity_provider:
+    description: Workload Identity 連携のプロバイダ (projects/.../providers/...)
+    required: true
+  gcp_service_account:
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: google-github-actions/auth@v2
+      with:
+        workload_identity_provider: ${{ inputs.gcp_workload_identity_provider }}
+        service_account: ${{ inputs.gcp_service_account }}
+
+    - uses: google-github-actions/setup-gcloud@v2
+
+    - name: Render service.yaml
+      shell: bash
+      env:
+        ENV: ${{ inputs.environment }}
+        IMAGE: ${{ inputs.image }}
+        SRC: ${{ inputs.service_dir }}/cloudrun/service.yaml
+      run: |
+        set -euo pipefail
+        envsubst < "$SRC" > "${RUNNER_TEMP}/service.yaml"
+        cat "${RUNNER_TEMP}/service.yaml"
+
+    - name: gcloud run services replace
+      shell: bash
+      env:
+        PROJECT: ${{ inputs.gcp_project_id }}
+        REGION: ${{ inputs.gcp_region }}
+      run: |
+        set -euo pipefail
+        # replace は新リビジョンが Ready になるまで待つ。失敗時はトラフィックが移らない
+        gcloud run services replace "${RUNNER_TEMP}/service.yaml" --project "$PROJECT" --region "$REGION"

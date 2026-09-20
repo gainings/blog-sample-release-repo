@@ -1,0 +1,35 @@
+# 手動で任意のサービス・環境に任意のイメージタグを再デプロイする (ロールバック用)。
+# image_tag には sha-<commit sha> か、本番リリース済みの vYYYY.MMDD.N を指定する。
+name: Rollback / Redeploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      service:
+        description: "Service name (directory under services/)"
+        required: true
+        type: string
+      environment:
+        description: "Target environment"
+        required: true
+        type: choice
+        options: [dev, stg, prod]
+      image_tag:
+        description: "Image tag to deploy (sha-<commit sha> or vYYYY.MMDD.N)"
+        required: true
+        type: string
+
+run-name: "rollback ${{ inputs.service }} ${{ inputs.environment }} → ${{ inputs.image_tag }}"
+
+permissions: {}
+
+jobs:
+  deploy:
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/deploy.yml
+    with:
+      service: ${{ inputs.service }}
+      environment: ${{ inputs.environment }}
+      image_tag: ${{ inputs.image_tag }}
