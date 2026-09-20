@@ -15,15 +15,16 @@
 - **イメージの更新はリポジトリ一致で行う**: `scripts/set-image.sh <service> <env> <image>...` は、渡されたイメージと同じリポジトリ (registry/repository) を値に持つ変数をすべて書き換える。アプリ側 CI は自分がビルドしたイメージを渡すだけでよく、別リポジトリ由来のサイドカーには触れない。該当する変数がなければエラーになる。
 - **認証先だけ GitHub Environments に置く**: 環境ごとに 1 つのデプロイ用ロール (AWS) / サービスアカウント (GCP)。OIDC の `sub` 条件を `environment:<env>` に絞れる。
 - **どこでも同じイメージ**: dev / stg / prd に同じイメージ (同じダイジェスト) が入る。再ビルドはしない。
-- **環境の区別をしない**: main に入った変更を、変更のあったディレクトリぶんだけ並列に適用する。「dev の後に stg」「タグが切られたら prd」といった順序は、アプリ側が **いつ main に入れるか** で表現する (dev / stg は即時 auto-merge、prd はタグ作成時の PR を人がマージ)。環境名は GitHub Environment (認証先、承認ルール) の参照にだけ使う。
+- **環境の区別をしない**: main に入った変更を、変更のあったディレクトリぶんだけ並列に適用する。「main マージで dev」「タグが切られたら stg、そのあと prd」といった順序は、アプリ側が **いつ main に入れるか** で表現する (dev とタグ時の stg は auto-merge、prd はタグ時の PR を人がマージ)。環境名は GitHub Environment (認証先、承認ルール) の参照にだけ使う。
 
 ```mermaid
 flowchart LR
     subgraph app[blog-sample-app-repo1]
         B[build & push<br/>sha-&lt;commit&gt;] --> T{tagpr}
     end
-    B -->|PR: dev, stg の image を更新<br/>auto-merge| M[(main)]
-    T -->|タグ作成時のみ<br/>PR: prd の image を更新<br/>手動マージ| M
+    B -->|PR: dev/.env を更新<br/>auto-merge| M[(main)]
+    T -->|タグ作成時<br/>PR: stg/.env を更新<br/>auto-merge| M
+    T -->|stg 適用後<br/>PR: prd/.env を更新<br/>手動マージ| M
     subgraph rel[blog-sample-release-repo]
         M --> C[changes<br/>変更のあった services/名/環境 を検出] --> X[deploy × 変更ぶん<br/>並列]
     end
@@ -68,8 +69,8 @@ flowchart LR
 ## リリースの流れ
 
 1. **アプリの main にマージ** → アプリ側 CI がイメージ (app と nginx) を `sha-<commit>` で push し、`scripts/set-image.sh` で `dev/.env` を書き換える PR をこのリポジトリに作って auto-merge する。
-2. **この main に入る** → `release.yml` が変更のあった `services/<name>/<env>/` を検出して適用する (dev)。アプリ側 CI はこの Release 実行の成功を待ってから、同じ手順で `stg/.env` の PR を作って auto-merge する → stg に適用される。
-3. **アプリ側で tagpr のリリース PR をマージ** → タグ (CalVer) が作られ、アプリ側 CI が `prd/.env` の `IMAGE` をそのタグに書き換える PR を作る。これは auto-merge しない。
+2. **この main に入る** → `release.yml` が変更のあった `services/<name>/<env>/` を検出して適用する (dev)。
+3. **アプリ側で tagpr のリリース PR をマージ** → タグ (CalVer) が作られる。アプリ側 CI が `stg/.env` をそのタグに書き換える PR を作って auto-merge し、stg への適用成功を待つ。続けて `prd/.env` を書き換える PR を作る。これは auto-merge しない。
 4. **prd の PR をマージ** (CODEOWNERS のレビュー) → `release.yml` が prd にデプロイする。これが本番リリース。
 5. **戻したいとき** → 該当コミットを `git revert` した PR をマージする。前の image に戻る。
 
