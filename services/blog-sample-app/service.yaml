@@ -1,8 +1,0 @@
-# 環境に依存しないサービス定義。環境ごとの設定は dev/ stg/ prd/ の各ディレクトリにある。
-name: blog-sample-app
-kind: ecs                                   # ecs | lambda | cloudrun
-source: gainings/blog-sample-app-repo1      # dispatch 元 (ドキュメント用)
-
-image:
-  registry: 111111111111.dkr.ecr.ap-northeast-1.amazonaws.com
-  repository: blog-sample-app

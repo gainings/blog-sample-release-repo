@@ -66,9 +66,8 @@ jobs:
           if [ -z "$SERVICE" ] || [ -z "$IMAGE_TAG" ]; then
             echo "::error::service and image_tag are required"; exit 1
           fi
-          m="services/${SERVICE}/service.yaml"
-          if [ ! -f "$m" ]; then
-            echo "::error::unknown service '${SERVICE}' (${m} not found)"; exit 1
+          if [ ! -d "services/${SERVICE}" ]; then
+            echo "::error::unknown service '${SERVICE}' (services/${SERVICE} not found)"; exit 1
           fi
 
           # デプロイ対象の環境を dev → stg → prd の順で決める (env.yaml があるものだけ)
@@ -97,7 +96,7 @@ jobs:
             echo "## Deploy request"
             echo "| key | value |"
             echo "|---|---|"
-            echo "| service | \`${SERVICE}\` (kind: \`$(yq '.kind' "$m")\`) |"
+            echo "| service | \`${SERVICE}\` |"
             echo "| image_tag | \`${IMAGE_TAG}\` |"
             echo "| release_tag | \`${RELEASE_TAG:-"(none)"}\` |"
             echo "| targets | \`${targets_json}\` |"

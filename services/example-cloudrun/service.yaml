@@ -1,8 +1,0 @@
-# Cloud Run を gcloud run services replace でデプロイする例。
-name: example-cloudrun
-kind: cloudrun
-source: gainings/example-cloudrun-repo
-
-image:
-  registry: asia-northeast1-docker.pkg.dev/example-project/apps
-  repository: example-cloudrun

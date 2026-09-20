@@ -1,6 +1,5 @@
 # 再利用ワークフロー: 1 つのサービスを 1 つの環境にデプロイする。
-#   services/<service>/service.yaml  … kind とイメージ (環境に依存しない)
-#   services/<service>/<env>/env.yaml … その環境の認証先 (aws / gcp) と任意の vars
+#   services/<service>/<env>/env.yaml … kind, image, 認証先 (aws / gcp), requires_release, 任意の vars
 #   services/<service>/<env>/<kind 別の定義> … ecspresso/ lambroll/ cloudrun/
 # kind に応じたデプロイ方式 (.github/actions/deploy-*) を呼ぶ。
 name: Deploy (reusable)
@@ -35,7 +34,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Read service / environment manifests
+      - name: Read environment manifest
         id: manifest
         env:
           SERVICE: ${{ inputs.service }}
@@ -43,17 +42,16 @@ jobs:
           IMAGE_TAG: ${{ inputs.image_tag }}
         run: |
           set -euo pipefail
-          svc="services/${SERVICE}/service.yaml"
           env_dir="services/${SERVICE}/${ENVIRONMENT}"
           envf="${env_dir}/env.yaml"
-          if [ ! -f "$svc" ]; then
-            echo "::error::unknown service '${SERVICE}' (${svc} not found)"; exit 1
+          if [ ! -d "services/${SERVICE}" ]; then
+            echo "::error::unknown service '${SERVICE}' (services/${SERVICE} not found)"; exit 1
           fi
           if [ ! -f "$envf" ]; then
             echo "::error::environment '${ENVIRONMENT}' is not defined for '${SERVICE}' (${envf} not found)"; exit 1
           fi
-          kind=$(yq '.kind' "$svc")
-          image="$(yq '.image.registry' "$svc")/$(yq '.image.repository' "$svc"):${IMAGE_TAG}"
+          kind=$(yq '.kind' "$envf")
+          image="$(yq '.image.registry' "$envf")/$(yq '.image.repository' "$envf"):${IMAGE_TAG}"
 
           {
             echo "env_dir=${env_dir}"

@@ -5,8 +5,8 @@
 
 ## 考え方
 
-- **サービス = ディレクトリ**: `services/<name>/` にサービスをまとめる。`service.yaml` にはデプロイ方式 (`kind`) とイメージの置き場だけを書く。
-- **環境 = サブディレクトリ**: `services/<name>/{dev,stg,prd}/` にその環境の接続先 (`env.yaml`) と **デプロイ定義の実体** を置く。環境間で定義をテンプレート共有せず、差分は `diff -r dev prd` で見える状態にする。`prd/` の変更は CODEOWNERS でレビュー必須にできる。
+- **サービス = ディレクトリ**: `services/<name>/` にサービスをまとめる。サービス自体に設定ファイルはない。
+- **環境 = サブディレクトリ**: `services/<name>/{dev,stg,prd}/` にその環境の `env.yaml` (デプロイ方式、イメージ、接続先) と **デプロイ定義の実体** を置く。環境に依存しない設定は持たない。デプロイ方式は定義ディレクトリと 1 対 1 で、イメージの置き場も環境ごとに変わり得るため、共通層を作っても共通化されないから。環境間で定義をテンプレート共有せず、差分は `diff -r dev prd` で見える状態にする。`prd/` の変更は CODEOWNERS でレビュー必須にできる。
 - **デプロイ方式はプラグイン**: `.github/actions/deploy-<kind>/` が 1 方式を担当する。`deploy.yml` は `kind` を見て振り分けるだけ。
 - **環境の進み方は共通**: dev → stg → prd の順。ディレクトリが無い環境はスキップし、`requires_release: true` の環境は release タグ付きの dispatch でだけ進む。前段が失敗したら後段には進まない。
 - **どこでも同じイメージ**: 全環境で同じイメージタグ (`sha-<commit>`) を使う。再ビルドはしない。
@@ -34,19 +34,16 @@ flowchart LR
 ```
 .
 ├── services/
-│   ├── blog-sample-app/                 # kind: ecs (実サービス)
-│   │   ├── service.yaml                 # kind, image, source
+│   ├── blog-sample-app/                 # 実サービス (ECS)
 │   │   ├── dev/
-│   │   │   ├── env.yaml                 # aws: region / account_id / role_arn, requires_release
+│   │   │   ├── env.yaml                 # kind, image, aws (region / account_id / role_arn), requires_release
 │   │   │   └── ecspresso/               # config.yaml, ecs-task-def.json, ecs-service-def.json
 │   │   ├── stg/ …
 │   │   └── prd/ …                       # requires_release: true
-│   ├── example-lambda/                  # kind: lambda (例)
-│   │   ├── service.yaml
+│   ├── example-lambda/                  # 例 (Lambda)
 │   │   ├── dev/{env.yaml, lambroll/function.json}
 │   │   └── prd/{env.yaml, lambroll/function.json}
-│   └── example-cloudrun/                # kind: cloudrun (例)
-│       ├── service.yaml
+│   └── example-cloudrun/                # 例 (Cloud Run)
 │       ├── dev/{env.yaml, cloudrun/service.yaml}
 │       └── prd/{env.yaml, cloudrun/service.yaml}
 ├── scripts/render.sh                    # 定義をダミー値でレンダリング (CI / ローカル共用)
@@ -63,24 +60,16 @@ flowchart LR
         └── ci.yml                       # PR: 全サービス × 全環境の render
 ```
 
-## マニフェスト
-
-### services/&lt;name&gt;/service.yaml (環境に依存しない)
+## マニフェスト: services/&lt;name&gt;/&lt;env&gt;/env.yaml
 
 ```yaml
-name: blog-sample-app
-kind: ecs                    # ecs | lambda | cloudrun
-source: gainings/blog-sample-app-repo1
-
-image:
-  registry: 111111111111.dkr.ecr.ap-northeast-1.amazonaws.com
-  repository: blog-sample-app
-```
-
-### services/&lt;name&gt;/&lt;env&gt;/env.yaml (環境ごと)
-
-```yaml
+kind: ecs                    # ecs | lambda | cloudrun (同じディレクトリの定義と対応)
 requires_release: true       # release_tag 付きの dispatch でだけデプロイ (prd 向け)
+
+image:                       # デプロイするイメージ (タグは dispatch の image_tag)
+  registry: 333333333333.dkr.ecr.ap-northeast-1.amazonaws.com
+  repository: blog-sample-app
+
 aws:                         # kind が ecs / lambda の場合
   region: ap-northeast-1
   account_id: "333333333333"
@@ -134,7 +123,7 @@ aws:                         # kind が ecs / lambda の場合
 
 ## サービスや環境を追加する
 
-- **サービスの追加**: `services/<name>/service.yaml` と、必要な環境のディレクトリを作る PR を出す。GitHub 側の設定変更は不要。
+- **サービスの追加**: `services/<name>/<env>/` を必要な環境ぶん作る PR を出す。GitHub 側の設定変更は不要。
 - **環境の追加**: `services/<name>/<env>/` を作る。既存の環境からコピーして値を書き換えるのが早い。
 - **環境を外す**: ディレクトリを消せばその環境はスキップされる。
 

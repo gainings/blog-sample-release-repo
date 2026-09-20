@@ -7,16 +7,15 @@ set -euo pipefail
 
 service="${1:?usage: $0 <service> <env>}"
 env_name="${2:?usage: $0 <service> <env>}"
-svc="services/${service}/service.yaml"
 env_dir="services/${service}/${env_name}"
 envf="${env_dir}/env.yaml"
 
-[ -f "$svc" ] || { echo "unknown service: ${service}" >&2; exit 1; }
+[ -d "services/${service}" ] || { echo "unknown service: ${service}" >&2; exit 1; }
 [ -f "$envf" ] || { echo "environment ${env_name} not defined for ${service} (${envf} not found)" >&2; exit 1; }
 
-kind=$(yq '.kind' "$svc")
+kind=$(yq '.kind' "$envf")
 export ENV="$env_name"
-export IMAGE="$(yq '.image.registry' "$svc")/$(yq '.image.repository' "$svc"):sha-dummy"
+export IMAGE="$(yq '.image.registry' "$envf")/$(yq '.image.repository' "$envf"):sha-dummy"
 export AWS_REGION="$(yq '.aws.region // "ap-northeast-1"' "$envf")"
 export AWS_ACCOUNT_ID="$(yq '.aws.account_id // "000000000000"' "$envf")"
 # 認証情報がなくても render できるようダミーを入れる

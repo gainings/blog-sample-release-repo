@@ -1,8 +1,0 @@
-# Lambda (コンテナイメージ) を lambroll でデプロイする例。
-name: example-lambda
-kind: lambda
-source: gainings/example-lambda-repo
-
-image:
-  registry: 111111111111.dkr.ecr.ap-northeast-1.amazonaws.com
-  repository: example-lambda
