@@ -17,8 +17,8 @@
   "enableExecuteCommand": true,
   "loadBalancers": [
     {
-      "containerName": "app",
-      "containerPort": 8080,
+      "containerName": "nginx",
+      "containerPort": 80,
       "targetGroupArn": "arn:aws:elasticloadbalancing:ap-northeast-1:222222222222:targetgroup/blog-sample-app-stg/0123456789abcdef"
     }
   ],

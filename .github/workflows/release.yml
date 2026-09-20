@@ -17,10 +17,8 @@ on:
 
 permissions: {}
 
-concurrency:
-  group: release-main
-  cancel-in-progress: false
-
+# ワークフロー全体の concurrency は付けない (pending は 1 つしか保持されず、連続マージ時に取りこぼすため)。
+# 同じ対象 (service × env) の直列化は deploy.yml 側の concurrency で行う。
 jobs:
   changes:
     name: detect changed environments

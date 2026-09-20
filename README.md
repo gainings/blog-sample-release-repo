@@ -11,7 +11,8 @@
 
 - **サービス = ディレクトリ、環境 = サブディレクトリ**: `services/<name>/{dev,stg,prd}/` に、その環境のデプロイ定義を **ツールのネイティブなファイルのまま** 置く。独自のマニフェストは持たない。
 - **デプロイ方式は置いてあるファイルで決まる**: `ecspresso.yml` があれば ECS、`function.json` があれば Lambda、`service.yaml` があれば Cloud Run。
-- **イメージは各環境の `.env` に書いてある**: `IMAGE=registry/repo:tag` の 1 行。ecspresso と lambroll は `--envfile` でこれを読み、定義内の `{{ must_env `IMAGE` }}` に入る。Cloud Run は `.env` を読み込んでから `service.yaml` を `envsubst` する。方式が違っても「イメージを更新する」操作は `.env` の 1 行の書き換えで済む。
+- **イメージは各環境の `.env` に書いてある**: `IMAGE=registry/repo:tag` の形の行。サイドカーがあれば `IMAGE_NGINX=...` のように行を増やす (変数名は自由)。ecspresso と lambroll は `--envfile` でこれを読み、定義内の `{{ must_env `IMAGE` }}` / `{{ must_env `IMAGE_NGINX` }}` に入る。Cloud Run は `.env` を読み込んでから `service.yaml` を `envsubst` する。方式が違っても「イメージを更新する」操作は `.env` の行の書き換えで済む。
+- **イメージの更新はリポジトリ一致で行う**: `scripts/set-image.sh <service> <env> <image>...` は、渡されたイメージと同じリポジトリ (registry/repository) を値に持つ変数をすべて書き換える。アプリ側 CI は自分がビルドしたイメージを渡すだけでよく、別リポジトリ由来のサイドカーには触れない。該当する変数がなければエラーになる。
 - **認証先だけ GitHub Environments に置く**: 環境ごとに 1 つのデプロイ用ロール (AWS) / サービスアカウント (GCP)。OIDC の `sub` 条件を `environment:<env>` に絞れる。
 - **どこでも同じイメージ**: dev / stg / prd に同じイメージ (同じダイジェスト) が入る。再ビルドはしない。
 - **環境の区別をしない**: main に入った変更を、変更のあったディレクトリぶんだけ並列に適用する。「dev の後に stg」「タグが切られたら prd」といった順序は、アプリ側が **いつ main に入れるか** で表現する (dev / stg は即時 auto-merge、prd はタグ作成時の PR を人がマージ)。環境名は GitHub Environment (認証先、承認ルール) の参照にだけ使う。
@@ -38,9 +39,9 @@ flowchart LR
 ├── services/
 │   ├── blog-sample-app/                 # ECS
 │   │   ├── dev/
-│   │   │   ├── .env                     # IMAGE=... (ecspresso --envfile)
+│   │   │   ├── .env                     # IMAGE=..., IMAGE_NGINX=... (ecspresso --envfile)
 │   │   │   ├── ecspresso.yml            # ecspresso 設定 (cluster, service, region)
-│   │   │   ├── ecs-task-def.json        # image: {{ must_env `IMAGE` }}
+│   │   │   ├── ecs-task-def.json        # app: {{ must_env `IMAGE` }}, nginx: {{ must_env `IMAGE_NGINX` }}
 │   │   │   └── ecs-service-def.json
 │   │   ├── stg/ …
 │   │   └── prd/ …
@@ -52,7 +53,7 @@ flowchart LR
 │       └── prd/{.env, service.yaml}
 ├── scripts/
 │   ├── kind.sh                          # ディレクトリ → ecs | lambda | cloudrun
-│   ├── set-image.sh                     # .env の IMAGE を差し替える (アプリ側 CI が呼ぶ)
+│   ├── set-image.sh                     # .env のイメージを差し替える (アプリ側 CI が呼ぶ。複数可)
 │   └── render.sh                        # 定義をツールに読ませて確認 (CI / ローカル)
 └── .github/
     ├── CODEOWNERS                       # services/*/prd/ のレビュー必須化
@@ -65,8 +66,8 @@ flowchart LR
 
 ## リリースの流れ
 
-1. **アプリの main にマージ** → アプリ側 CI がイメージを `sha-<commit>` で push し、`scripts/set-image.sh` で `dev/.env` と `stg/.env` の `IMAGE` を書き換える PR をこのリポジトリに作り、auto-merge する。
-2. **この main に入る** → `release.yml` が変更のあった `services/<name>/<env>/` を検出し、それぞれに適用する (この例では dev と stg)。
+1. **アプリの main にマージ** → アプリ側 CI がイメージ (app と nginx) を `sha-<commit>` で push し、`scripts/set-image.sh` で `dev/.env` を書き換える PR をこのリポジトリに作って auto-merge する。
+2. **この main に入る** → `release.yml` が変更のあった `services/<name>/<env>/` を検出して適用する (dev)。アプリ側 CI はこの Release 実行の成功を待ってから、同じ手順で `stg/.env` の PR を作って auto-merge する → stg に適用される。
 3. **アプリ側で tagpr のリリース PR をマージ** → タグ (CalVer) が作られ、アプリ側 CI が `prd/.env` の `IMAGE` をそのタグに書き換える PR を作る。これは auto-merge しない。
 4. **prd の PR をマージ** (CODEOWNERS のレビュー) → `release.yml` が prd にデプロイする。これが本番リリース。
 5. **戻したいとき** → 該当コミットを `git revert` した PR をマージする。前の image に戻る。
@@ -123,8 +124,10 @@ AWS の OIDC なら `sub` を `repo:gainings/blog-sample-release-repo:environmen
 
 ```sh
 scripts/render.sh blog-sample-app dev
-scripts/set-image.sh blog-sample-app dev 111111111111.dkr.ecr.ap-northeast-1.amazonaws.com/blog-sample-app:sha-abc123
-git diff   # dev/.env の IMAGE だけが変わる
+scripts/set-image.sh blog-sample-app dev \
+  111111111111.dkr.ecr.ap-northeast-1.amazonaws.com/blog-sample-app:sha-abc123 \
+  111111111111.dkr.ecr.ap-northeast-1.amazonaws.com/blog-sample-app-nginx:sha-abc123
+git diff   # dev/.env の IMAGE と IMAGE_NGINX が変わる
 ```
 
 `yq`, `jq`, `ecspresso`, `lambroll` が必要です。クラウドには接続しません。

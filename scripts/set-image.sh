@@ -1,25 +1,45 @@
 #!/usr/bin/env bash
-# 環境ディレクトリの .env にある IMAGE を差し替える。アプリリポジトリの CI がこのスクリプトを呼んで PR を作る。
-# デプロイ方式によらず .env の 1 行を書き換えるだけ。安全のため、同じリポジトリ (registry/repository) への更新だけを受け付ける。
-#   scripts/set-image.sh <service> <env> <registry/repository:tag>
+# 環境ディレクトリの .env にあるイメージを差し替える。アプリリポジトリの CI がこのスクリプトを呼んで PR を作る。
+#
+#   scripts/set-image.sh <service> <env> <registry/repository:tag> [<registry/repository:tag> ...]
+#
+# .env の中で「値が同じリポジトリ (registry/repository) を指している変数」をすべて書き換える。
+# 変数名は問わない (IMAGE, IMAGE_NGINX, IMAGE_LOG_ROUTER など)。サイドカーのように 1 つの環境に複数の
+# イメージがあっても、呼び出し側は自分がビルドしたイメージを渡すだけでよく、他のイメージには触れない。
+# 渡したイメージのリポジトリを参照する変数が 1 つもなければエラーにする (別サービスへの誤投入を防ぐ)。
 set -euo pipefail
-service="${1:?usage: $0 <service> <env> <image>}"
-env_name="${2:?usage: $0 <service> <env> <image>}"
-image="${3:?usage: $0 <service> <env> <image>}"
+service="${1:?usage: $0 <service> <env> <image>...}"
+env_name="${2:?usage: $0 <service> <env> <image>...}"
+shift 2
+[ "$#" -ge 1 ] || { echo "usage: $0 <service> <env> <image>..." >&2; exit 1; }
 f="services/${service}/${env_name}/.env"
 [ -f "$f" ] || { echo "no such environment: ${f}" >&2; exit 1; }
 
-current=$(sed -n 's/^IMAGE=//p' "$f" | tail -n 1)
-[ -n "$current" ] || { echo "${f}: IMAGE= line not found" >&2; exit 1; }
-if [ "${current%:*}" != "${image%:*}" ]; then
-  echo "${f}: repository mismatch (current: ${current%:*}, new: ${image%:*}); nothing changed" >&2
-  exit 1
-fi
-if [ "$current" = "$image" ]; then
-  echo "${f}: already ${image}"
+work=$(mktemp); next=$(mktemp); trap 'rm -f "$work" "$next"' EXIT
+cp "$f" "$work"
+for image in "$@"; do
+  repo="${image%:*}"
+  REPO="$repo" IMG="$image" awk '
+    BEGIN { repo = ENVIRON["REPO"]; img = ENVIRON["IMG"] }
+    /^[A-Za-z_][A-Za-z0-9_]*=/ {
+      key = $0; sub(/=.*/, "", key)
+      val = $0; sub(/^[^=]*=/, "", val)
+      r = val; sub(/:[^:\/]*$/, "", r)
+      if (r == repo) { print key "=" img; next }
+    }
+    { print }
+  ' "$work" > "$next"
+  if ! grep -Eq "^[A-Za-z_][A-Za-z0-9_]*=${repo//./\\.}:" "$next"; then
+    echo "${f}: no variable references repository ${repo}; nothing changed for ${image}" >&2
+    exit 1
+  fi
+  mv "$next" "$work"
+done
+
+if cmp -s "$f" "$work"; then
+  echo "${f}: no changes"
   exit 0
 fi
-tmp=$(mktemp); trap 'rm -f "$tmp"' EXIT
-IMG="$image" awk 'BEGIN{img=ENVIRON["IMG"]} /^IMAGE=/{print "IMAGE=" img; next} {print}' "$f" > "$tmp"
-cat "$tmp" > "$f"
-echo "${f}: ${current} -> ${image}"
+diff "$f" "$work" | sed -n 's/^> /  /p'
+cat "$work" > "$f"
+echo "${f}: updated"
