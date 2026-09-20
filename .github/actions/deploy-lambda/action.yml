@@ -1,18 +1,13 @@
 name: Deploy to Lambda (lambroll)
-description: services/<service>/<env>/function.json を lambroll でデプロイする (コンテナイメージ)
+description: <dir>/function.json (+ .env) を lambroll でデプロイする (コンテナイメージ)
 
 inputs:
-  env_dir:
-    required: true
-  environment:
-    required: true
-  image:
-    required: true
-  aws_region:
-    required: true
-  aws_account_id:
+  dir:
+    description: 環境ディレクトリ (services/<service>/<env>)
     required: true
   aws_role_arn:
+    required: true
+  aws_region:
     required: true
   lambroll_version:
     required: false
@@ -33,13 +28,10 @@ runs:
     - name: lambroll diff / deploy
       shell: bash
       env:
-        ENV: ${{ inputs.environment }}
-        IMAGE: ${{ inputs.image }}
-        AWS_REGION: ${{ inputs.aws_region }}
-        AWS_ACCOUNT_ID: ${{ inputs.aws_account_id }}
-        FUNCTION: ${{ inputs.env_dir }}/function.json
+        DIR: ${{ inputs.dir }}
       run: |
         set -euo pipefail
-        lambroll diff --function "$FUNCTION" || true
+        l() { lambroll --envfile "$DIR/.env" "$@" --function "$DIR/function.json"; }
+        l diff || true
         # 新しいバージョンを publish し、エイリアス current を付け替える
-        lambroll deploy --function "$FUNCTION"
+        l deploy

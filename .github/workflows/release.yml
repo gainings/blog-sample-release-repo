@@ -1,142 +1,108 @@
-# 各アプリリポジトリからの repository_dispatch (event_type: deploy) を受けてデプロイする。
+# main にあるものをリリースする。
 #
-#   params ──> deploy-dev ──> deploy-stg ──> deploy-prd
+# - push (main): そのコミットで変更があった services/<service>/<env>/ を dev → stg → prd の順にデプロイする。
+#   同じ環境の複数サービスは並列。前段の環境が失敗したら後段には進まない。
+# - workflow_dispatch: 引数なし。main の全サービス・全環境を再デプロイする (差分がなければ各ツールが no-op に近い)。
 #
-# - どの環境にデプロイするかは services/<service>/<env>/env.yaml の有無で決まる (無い環境はスキップ)
-# - env.yaml で requires_release: true の環境は、payload に release_tag がある時だけデプロイされる
-# - 前段の環境が失敗したら後段には進まない
-#
-# payload:
-#   service:        services/ 配下のディレクトリ名。必須
-#   image_tag:      イメージタグ (sha-<commit sha>)。必須
-#   release_tag:    tagpr が作った CalVer タグ (vYYYY.MMDD.N)。空なら requires_release の環境はスキップ
-#   sha:            アプリ側のコミット SHA (表示用)
-#   source_run_url: アプリ側のワークフロー実行 URL (表示用)
-#
-# workflow_dispatch でも同じ引数で手動実行できる。
+# 入力は持たない。「何をどこに出すか」はすべてリポジトリの内容 (= main) で決まる。
+# ロールバックは対象コミットを git revert して main にマージする。
 name: Release
 
-run-name: "deploy ${{ github.event.client_payload.service || inputs.service }} ${{ github.event.client_payload.image_tag || inputs.image_tag }} ${{ github.event.client_payload.release_tag || inputs.release_tag }}"
-
 on:
-  repository_dispatch:
-    types: [deploy]
+  push:
+    branches: [main]
+    paths: [services/**]
   workflow_dispatch:
-    inputs:
-      service:
-        description: "Service name (directory under services/)"
-        required: true
-        type: string
-      image_tag:
-        description: "Image tag to deploy (sha-<commit sha>)"
-        required: true
-        type: string
-      release_tag:
-        description: "Release tag (vYYYY.MMDD.N). Set to deploy through to requires_release environments"
-        required: false
-        type: string
-        default: ""
 
 permissions: {}
 
 concurrency:
-  group: release-${{ github.event.client_payload.service || inputs.service }}
+  group: release-main
   cancel-in-progress: false
 
 jobs:
-  params:
-    name: resolve parameters
+  changes:
+    name: detect changed environments
     runs-on: ubuntu-latest
     outputs:
-      service: ${{ steps.p.outputs.service }}
-      image_tag: ${{ steps.p.outputs.image_tag }}
-      release_tag: ${{ steps.p.outputs.release_tag }}
-      targets: ${{ steps.p.outputs.targets }}
+      dev: ${{ steps.c.outputs.dev }}
+      stg: ${{ steps.c.outputs.stg }}
+      prd: ${{ steps.c.outputs.prd }}
     steps:
       - uses: actions/checkout@v4
-      - id: p
+        with:
+          fetch-depth: 0
+      - id: c
         env:
-          SERVICE: ${{ github.event.client_payload.service || inputs.service }}
-          IMAGE_TAG: ${{ github.event.client_payload.image_tag || inputs.image_tag }}
-          RELEASE_TAG: ${{ github.event.client_payload.release_tag || inputs.release_tag }}
-          SHA: ${{ github.event.client_payload.sha }}
-          SOURCE_RUN_URL: ${{ github.event.client_payload.source_run_url }}
+          BEFORE: ${{ github.event.before }}
+          EVENT: ${{ github.event_name }}
         run: |
           set -euo pipefail
-          if [ -z "$SERVICE" ] || [ -z "$IMAGE_TAG" ]; then
-            echo "::error::service and image_tag are required"; exit 1
+          if [ "$EVENT" = "workflow_dispatch" ] || [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BEFORE" 2>/dev/null; then
+            echo "full sync: all environments"
+            dirs=$(find services -mindepth 2 -maxdepth 2 -type d | sort)
+          else
+            dirs=$(git diff --name-only "$BEFORE" "$GITHUB_SHA" -- services/ \
+              | awk -F/ 'NF >= 4 { print $1"/"$2"/"$3 }' | sort -u)
           fi
-          if [ ! -d "services/${SERVICE}" ]; then
-            echo "::error::unknown service '${SERVICE}' (services/${SERVICE} not found)"; exit 1
-          fi
+          # 削除された環境は対象外
+          dirs=$(for d in $dirs; do [ -d "$d" ] && echo "$d" || true; done)
 
-          # デプロイ対象の環境を dev → stg → prd の順で決める (env.yaml があるものだけ)
-          targets=()
+          echo "targets:"; echo "${dirs:-  (none)}"
           for env in dev stg prd; do
-            envf="services/${SERVICE}/${env}/env.yaml"
-            if [ ! -f "$envf" ]; then
-              continue
-            fi
-            if [ "$(yq '.requires_release // false' "$envf")" = "true" ] && [ -z "$RELEASE_TAG" ]; then
-              echo "skip ${env}: requires_release but no release_tag"
-              continue
-            fi
-            targets+=("$env")
+            list=$(echo "$dirs" | awk -F/ -v e="$env" '$3 == e { print $2 }' | jq -R . | jq -cs .)
+            echo "${env}=${list}" >> "$GITHUB_OUTPUT"
+            echo "${env}: ${list}"
           done
-          targets_json=$(printf '%s\n' "${targets[@]:-}" | grep -v '^$' | jq -R . | jq -cs .)
-
           {
-            echo "service=${SERVICE}"
-            echo "image_tag=${IMAGE_TAG}"
-            echo "release_tag=${RELEASE_TAG}"
-            echo "targets=${targets_json}"
-          } >> "$GITHUB_OUTPUT"
-
-          {
-            echo "## Deploy request"
-            echo "| key | value |"
-            echo "|---|---|"
-            echo "| service | \`${SERVICE}\` |"
-            echo "| image_tag | \`${IMAGE_TAG}\` |"
-            echo "| release_tag | \`${RELEASE_TAG:-"(none)"}\` |"
-            echo "| targets | \`${targets_json}\` |"
-            echo "| sha | \`${SHA:-"-"}\` |"
-            echo "| source | ${SOURCE_RUN_URL:-"-"} |"
+            echo "## Release ${GITHUB_SHA::7}"
+            echo '```'
+            echo "${dirs:-(no changes under services/)}"
+            echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
   deploy-dev:
-    needs: params
-    if: contains(fromJSON(needs.params.outputs.targets), 'dev')
+    needs: changes
+    if: needs.changes.outputs.dev != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJSON(needs.changes.outputs.dev) }}
     permissions:
       id-token: write
       contents: read
     uses: ./.github/workflows/deploy.yml
     with:
-      service: ${{ needs.params.outputs.service }}
+      service: ${{ matrix.service }}
       environment: dev
-      image_tag: ${{ needs.params.outputs.image_tag }}
 
   deploy-stg:
-    needs: [params, deploy-dev]
-    # 前段がスキップされても進むが、失敗していたら進まない
-    if: ${{ !cancelled() && !failure() && contains(fromJSON(needs.params.outputs.targets), 'stg') }}
+    needs: [changes, deploy-dev]
+    # dev に変更がなければスキップされた dev を飛び越えて進む。dev が失敗していたら進まない
+    if: ${{ !cancelled() && !failure() && needs.changes.outputs.stg != '[]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJSON(needs.changes.outputs.stg) }}
     permissions:
       id-token: write
       contents: read
     uses: ./.github/workflows/deploy.yml
     with:
-      service: ${{ needs.params.outputs.service }}
+      service: ${{ matrix.service }}
       environment: stg
-      image_tag: ${{ needs.params.outputs.image_tag }}
 
   deploy-prd:
-    needs: [params, deploy-dev, deploy-stg]
-    if: ${{ !cancelled() && !failure() && contains(fromJSON(needs.params.outputs.targets), 'prd') }}
+    needs: [changes, deploy-dev, deploy-stg]
+    if: ${{ !cancelled() && !failure() && needs.changes.outputs.prd != '[]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJSON(needs.changes.outputs.prd) }}
     permissions:
       id-token: write
       contents: read
     uses: ./.github/workflows/deploy.yml
     with:
-      service: ${{ needs.params.outputs.service }}
+      service: ${{ matrix.service }}
       environment: prd
-      image_tag: ${{ needs.params.outputs.image_tag }}

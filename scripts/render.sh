@@ -1,46 +1,30 @@
 #!/usr/bin/env bash
-# デプロイ定義をダミーのイメージでレンダリングして表示する (クラウドには接続しない)。
-# CI とローカルの両方から使う。
-#
+# 定義ファイルを .env と合わせてツールに読ませ、構文と内容を確認する (クラウドには接続しない)。CI とローカルの両方から使う。
 #   scripts/render.sh <service> <env>
 set -euo pipefail
-
 service="${1:?usage: $0 <service> <env>}"
 env_name="${2:?usage: $0 <service> <env>}"
-env_dir="services/${service}/${env_name}"
-envf="${env_dir}/env.yaml"
+dir="services/${service}/${env_name}"
+[ -d "$dir" ] || { echo "no such environment: ${dir}" >&2; exit 1; }
+kind=$("$(dirname "$0")/kind.sh" "$dir")
 
-[ -d "services/${service}" ] || { echo "unknown service: ${service}" >&2; exit 1; }
-[ -f "$envf" ] || { echo "environment ${env_name} not defined for ${service} (${envf} not found)" >&2; exit 1; }
-
-kind=$(yq '.kind' "$envf")
-export ENV="$env_name"
-export IMAGE="$(yq '.image.registry' "$envf")/$(yq '.image.repository' "$envf"):sha-dummy"
-export AWS_REGION="$(yq '.aws.region // "ap-northeast-1"' "$envf")"
-export AWS_ACCOUNT_ID="$(yq '.aws.account_id // "000000000000"' "$envf")"
 # 認証情報がなくても render できるようダミーを入れる
 export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-dummy}"
 export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-dummy}"
+export AWS_REGION="${AWS_REGION:-ap-northeast-1}"
 
-# env.yaml の vars (任意) を環境変数に展開する
-while IFS='=' read -r k v; do
-  [ -n "$k" ] && export "$k=$v"
-done < <(yq '.vars // {} | to_entries[] | .key + "=" + (.value | tostring)' "$envf")
-
-echo "==> ${service} (${kind}) / ${env_name} / ${IMAGE}"
+echo "==> ${service} / ${env_name} (${kind})"
 case "$kind" in
   ecs)
-    ecspresso render --config "${env_dir}/ecspresso.yml" config
-    ecspresso render --config "${env_dir}/ecspresso.yml" task-definition
-    ecspresso render --config "${env_dir}/ecspresso.yml" service-definition
+    ecspresso --envfile "${dir}/.env" --config "${dir}/ecspresso.yml" render config
+    ecspresso --envfile "${dir}/.env" --config "${dir}/ecspresso.yml" render task-definition
+    ecspresso --envfile "${dir}/.env" --config "${dir}/ecspresso.yml" render service-definition
     ;;
   lambda)
-    lambroll render --function "${env_dir}/function.json"
+    lambroll --envfile "${dir}/.env" render --function "${dir}/function.json"
     ;;
   cloudrun)
-    envsubst < "${env_dir}/service.yaml" | tee /dev/stderr | yq -e '.spec.template.spec.containers[0].image' >/dev/null
-    ;;
-  *)
-    echo "unsupported kind: ${kind}" >&2; exit 1
+    set -a; . "${dir}/.env"; set +a
+    envsubst < "${dir}/service.yaml" | tee /dev/stderr | yq -e '.spec.template.spec.containers[0].image | test(":")' >/dev/null
     ;;
 esac

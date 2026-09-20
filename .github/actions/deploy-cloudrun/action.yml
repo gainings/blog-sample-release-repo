@@ -1,12 +1,9 @@
 name: Deploy to Cloud Run (gcloud)
-description: services/<service>/<env>/service.yaml を envsubst で埋めて gcloud run services replace する
+description: <dir>/service.yaml を .env で envsubst し、gcloud run services replace で適用する
 
 inputs:
-  env_dir:
-    required: true
-  environment:
-    required: true
-  image:
+  dir:
+    description: 環境ディレクトリ (services/<service>/<env>)
     required: true
   gcp_project_id:
     required: true
@@ -28,23 +25,16 @@ runs:
 
     - uses: google-github-actions/setup-gcloud@v2
 
-    - name: Render service.yaml
+    - name: Render and replace
       shell: bash
       env:
-        ENV: ${{ inputs.environment }}
-        IMAGE: ${{ inputs.image }}
-        SRC: ${{ inputs.env_dir }}/service.yaml
-      run: |
-        set -euo pipefail
-        envsubst < "$SRC" > "${RUNNER_TEMP}/service.yaml"
-        cat "${RUNNER_TEMP}/service.yaml"
-
-    - name: gcloud run services replace
-      shell: bash
-      env:
+        DIR: ${{ inputs.dir }}
         PROJECT: ${{ inputs.gcp_project_id }}
         REGION: ${{ inputs.gcp_region }}
       run: |
         set -euo pipefail
+        set -a; . "$DIR/.env"; set +a
+        envsubst < "$DIR/service.yaml" > "$RUNNER_TEMP/service.yaml"
+        cat "$RUNNER_TEMP/service.yaml"
         # replace は新リビジョンが Ready になるまで待つ。失敗時はトラフィックが移らない
-        gcloud run services replace "${RUNNER_TEMP}/service.yaml" --project "$PROJECT" --region "$REGION"
+        gcloud run services replace "$RUNNER_TEMP/service.yaml" --project "$PROJECT" --region "$REGION"

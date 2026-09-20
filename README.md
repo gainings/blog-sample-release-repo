@@ -1,32 +1,33 @@
 # blog-sample-release-repo
 
 複数のサービスを、それぞれのデプロイ方式 (ECS / Lambda / Cloud Run) で環境ごとにデプロイするためのリリースリポジトリです。
-各アプリリポジトリはイメージをビルドして `repository_dispatch` を送るだけで、**デプロイ定義とデプロイの実行はすべてこのリポジトリが持ちます**。
+**main にあるものがリリースされているもの**、という状態を保ちます。
+
+- アプリリポジトリは、イメージをビルドしたらこのリポジトリの定義ファイル内のイメージを書き換える PR を作ります。
+- この main に入った変更は、変更のあった環境ディレクトリだけが dev → stg → prd の順に自動で適用されます。
+- ワークフローに入力はありません。ロールバックは `git revert` です。
 
 ## 考え方
 
-- **サービス = ディレクトリ**: `services/<name>/` にサービスをまとめる。サービス自体に設定ファイルはない。
-- **環境 = サブディレクトリ**: `services/<name>/{dev,stg,prd}/` にその環境の `env.yaml` (デプロイ方式、イメージ、接続先) と **デプロイ定義の実体** を置く。環境に依存しない設定は持たない。デプロイ方式は定義ディレクトリと 1 対 1 で、イメージの置き場も環境ごとに変わり得るため、共通層を作っても共通化されないから。環境間で定義をテンプレート共有せず、差分は `diff -r dev prd` で見える状態にする。`prd/` の変更は CODEOWNERS でレビュー必須にできる。
-- **デプロイ方式はプラグイン**: `.github/actions/deploy-<kind>/` が 1 方式を担当する。`deploy.yml` は `kind` を見て振り分けるだけ。
-- **環境の進み方は共通**: dev → stg → prd の順。ディレクトリが無い環境はスキップし、`requires_release: true` の環境は release タグ付きの dispatch でだけ進む。前段が失敗したら後段には進まない。
-- **どこでも同じイメージ**: 全環境で同じイメージタグ (`sha-<commit>`) を使う。再ビルドはしない。
+- **サービス = ディレクトリ、環境 = サブディレクトリ**: `services/<name>/{dev,stg,prd}/` に、その環境のデプロイ定義を **ツールのネイティブなファイルのまま** 置く。独自のマニフェストは持たない。
+- **デプロイ方式は置いてあるファイルで決まる**: `ecspresso.yml` があれば ECS、`function.json` があれば Lambda、`service.yaml` があれば Cloud Run。
+- **イメージは各環境の `.env` に書いてある**: `IMAGE=registry/repo:tag` の 1 行。ecspresso と lambroll は `--envfile` でこれを読み、定義内の `{{ must_env `IMAGE` }}` に入る。Cloud Run は `.env` を読み込んでから `service.yaml` を `envsubst` する。方式が違っても「イメージを更新する」操作は `.env` の 1 行の書き換えで済む。
+- **認証先だけ GitHub Environments に置く**: 環境ごとに 1 つのデプロイ用ロール (AWS) / サービスアカウント (GCP)。OIDC の `sub` 条件を `environment:<env>` に絞れる。
+- **どこでも同じイメージ**: dev / stg / prd に同じイメージ (同じダイジェスト) が入る。再ビルドはしない。
 
 ```mermaid
 flowchart LR
-    subgraph apps[アプリリポジトリ群]
-        A1[blog-sample-app-repo1<br/>build → tagpr]
-        A2[example-lambda-repo]
-        A3[example-cloudrun-repo]
+    subgraph app[blog-sample-app-repo1]
+        B[build & push<br/>sha-&lt;commit&gt;] --> T{tagpr}
     end
-    A1 -->|repository_dispatch<br/>service, image_tag, release_tag| R
-    A2 -.-> R
-    A3 -.-> R
-    subgraph R[blog-sample-release-repo]
-        P[params<br/>env.yaml の有無を見る] --> D[dev/] --> S[stg/] --> Pr[prd/<br/>requires_release]
+    B -->|PR: dev, stg の image を更新<br/>auto-merge| M[(main)]
+    T -->|タグ作成時のみ<br/>PR: prd の image を更新<br/>手動マージ| M
+    subgraph rel[blog-sample-release-repo]
+        M --> C[changes<br/>変更のあった環境を検出] --> D[dev] --> S[stg] --> P[prd]
     end
-    D & S & Pr -->|kind: ecs| ECS[ecspresso]
-    D & S & Pr -->|kind: lambda| LMB[lambroll]
-    D & S & Pr -->|kind: cloudrun| CR[gcloud run]
+    D & S & P -->|ecspresso.yml| ECS[ECS]
+    D & S & P -->|function.json| LMB[Lambda]
+    D & S & P -->|service.yaml| CR[Cloud Run]
 ```
 
 ## ディレクトリ構成
@@ -34,123 +35,93 @@ flowchart LR
 ```
 .
 ├── services/
-│   ├── blog-sample-app/                 # 実サービス (ECS)
+│   ├── blog-sample-app/                 # ECS
 │   │   ├── dev/
-│   │   │   ├── env.yaml                 # kind, image, aws (region / account_id / role_arn), requires_release
-│   │   │   ├── ecspresso.yml            # ecspresso 設定
-│   │   │   ├── ecs-task-def.json
+│   │   │   ├── .env                     # IMAGE=... (ecspresso --envfile)
+│   │   │   ├── ecspresso.yml            # ecspresso 設定 (cluster, service, region)
+│   │   │   ├── ecs-task-def.json        # image: {{ must_env `IMAGE` }}
 │   │   │   └── ecs-service-def.json
 │   │   ├── stg/ …
-│   │   └── prd/ …                       # requires_release: true
-│   ├── example-lambda/                  # 例 (Lambda)
-│   │   ├── dev/{env.yaml, function.json}
-│   │   └── prd/{env.yaml, function.json}
-│   └── example-cloudrun/                # 例 (Cloud Run)
-│       ├── dev/{env.yaml, service.yaml}
-│       └── prd/{env.yaml, service.yaml}
-├── scripts/render.sh                    # 定義をダミー値でレンダリング (CI / ローカル共用)
+│   │   └── prd/ …
+│   ├── example-lambda/                  # Lambda (例)
+│   │   ├── dev/{.env, function.json}    # lambroll --envfile
+│   │   └── prd/{.env, function.json}
+│   └── example-cloudrun/                # Cloud Run (例)
+│       ├── dev/{.env, service.yaml}     # envsubst
+│       └── prd/{.env, service.yaml}
+├── scripts/
+│   ├── kind.sh                          # ディレクトリ → ecs | lambda | cloudrun
+│   ├── set-image.sh                     # .env の IMAGE を差し替える (アプリ側 CI が呼ぶ)
+│   └── render.sh                        # 定義をツールに読ませて確認 (CI / ローカル)
 └── .github/
-    ├── CODEOWNERS                       # services/*/prd/ のレビュー必須化の例
-    ├── actions/
-    │   ├── deploy-ecs/                  # ecspresso verify / diff / deploy
-    │   ├── deploy-lambda/               # lambroll diff / deploy
-    │   └── deploy-cloudrun/             # envsubst → gcloud run services replace
+    ├── CODEOWNERS                       # services/*/prd/ のレビュー必須化
+    ├── actions/deploy-{ecs,lambda,cloudrun}/
     └── workflows/
-        ├── release.yml                  # repository_dispatch を受けて dev → stg → prd
-        ├── deploy.yml                   # 再利用: 1 サービス × 1 環境 (kind で振り分け)
-        ├── rollback.yml                 # 手動: 任意タグの再デプロイ
+        ├── release.yml                  # main push: 変更のあった環境を dev → stg → prd
+        ├── deploy.yml                   # 再利用: 1 サービス × 1 環境
         └── ci.yml                       # PR: 全サービス × 全環境の render
 ```
 
-## マニフェスト: services/&lt;name&gt;/&lt;env&gt;/env.yaml
+## リリースの流れ
 
-```yaml
-kind: ecs                    # ecs | lambda | cloudrun (同じディレクトリに置く定義の種類)
-requires_release: true       # release_tag 付きの dispatch でだけデプロイ (prd 向け)
+1. **アプリの main にマージ** → アプリ側 CI がイメージを `sha-<commit>` で push し、`scripts/set-image.sh` で `dev/.env` と `stg/.env` の `IMAGE` を書き換える PR をこのリポジトリに作り、auto-merge する。
+2. **この main に入る** → `release.yml` が変更のあった `services/<name>/<env>/` を検出し、dev → stg の順にデプロイする。
+3. **アプリ側で tagpr のリリース PR をマージ** → タグ (CalVer) が作られ、アプリ側 CI が `prd/.env` の `IMAGE` をそのタグに書き換える PR を作る。これは auto-merge しない。
+4. **prd の PR をマージ** (CODEOWNERS のレビュー) → `release.yml` が prd にデプロイする。これが本番リリース。
+5. **戻したいとき** → 該当コミットを `git revert` した PR をマージする。前の image に戻る。
 
-image:                       # デプロイするイメージ (タグは dispatch の image_tag)
-  registry: 333333333333.dkr.ecr.ap-northeast-1.amazonaws.com
-  repository: blog-sample-app
-
-aws:                         # kind が ecs / lambda の場合
-  region: ap-northeast-1
-  account_id: "333333333333"
-  role_arn: arn:aws:iam::333333333333:role/gha-release-blog-sample-app-prd
-# gcp:                       # kind が cloudrun の場合
-#   project_id: …
-#   region: …
-#   workload_identity_provider: projects/…/providers/…
-#   service_account: …
-# vars:                      # 任意。デプロイ定義のテンプレートに環境変数として渡す
-#   FOO: bar
-```
-
-デプロイ定義は `env.yaml` と同じディレクトリに直接置きます (`ecs` は `ecspresso.yml` + `ecs-task-def.json` + `ecs-service-def.json`、`lambda` は `function.json`、`cloudrun` は `service.yaml`)。定義の中で差し替えるのは基本的にイメージだけで、ecspresso / lambroll では `{{ must_env `IMAGE` }}`、Cloud Run の `service.yaml` では `${IMAGE}` と書きます。`ENV`, `AWS_REGION`, `AWS_ACCOUNT_ID` と `vars` の各キーも環境変数として使えます。
+手動で全件を再適用したいときは `Release` ワークフローを `workflow_dispatch` で実行します (引数なし)。
 
 ## デプロイ方式ごとの動き
 
-| kind | ツール | 認証 | 実行内容 |
+| 判定ファイル | ツール | 認証 | 実行内容 |
 |---|---|---|---|
-| `ecs` | [ecspresso](https://github.com/kayac/ecspresso) | AWS OIDC | `verify` → `diff` → `deploy` (サービス安定化まで待機。サーキットブレーカーで自動ロールバック) |
-| `lambda` | [lambroll](https://github.com/fujiwara/lambroll) | AWS OIDC | `diff` → `deploy` (コンテナイメージ。新バージョンを publish してエイリアスを付け替え) |
-| `cloudrun` | gcloud | GCP Workload Identity | `envsubst` で `service.yaml` を埋めて `gcloud run services replace` (新リビジョンが Ready になるまで待機) |
+| `ecspresso.yml` | [ecspresso](https://github.com/kayac/ecspresso) | AWS OIDC | `--envfile .env` で `verify` → `diff` → `deploy` (サービス安定化まで待機。サーキットブレーカーで自動ロールバック) |
+| `function.json` | [lambroll](https://github.com/fujiwara/lambroll) | AWS OIDC | `--envfile .env` で `diff` → `deploy` (コンテナイメージ。新バージョンを publish してエイリアスを付け替え) |
+| `service.yaml` | gcloud | GCP Workload Identity | `.env` を読んで `envsubst` → `gcloud run services replace` (新リビジョンが Ready になるまで待機) |
 
-新しい方式を足すときは `.github/actions/deploy-<kind>/action.yml` を追加し、`deploy.yml` に分岐を 1 つ足します。
-
-## 起動方法
-
-### repository_dispatch (通常)
-
-アプリリポジトリから GitHub App のトークンで送ります。
-
-```json
-{
-  "event_type": "deploy",
-  "client_payload": {
-    "service": "blog-sample-app",
-    "image_tag": "sha-0123abcd...",
-    "release_tag": "v2026.0920.0",
-    "sha": "0123abcd...",
-    "source_run_url": "https://github.com/.../actions/runs/..."
-  }
-}
-```
-
-`release_tag` が空なら `requires_release: true` の環境 (通常は prd) はスキップされます。
-
-### 手動
-
-- `Release` ワークフローの `workflow_dispatch`: 同じ引数で通しのデプロイを実行します。
-- `Rollback / Redeploy`: サービス、環境、イメージタグ (`sha-...` または `vYYYY.MMDD.N`) を指定して再デプロイします。
+新しい方式を足すときは `.github/actions/deploy-<kind>/action.yml` を追加し、`scripts/kind.sh` と `deploy.yml` に分岐を 1 つずつ足します。
 
 ## サービスや環境を追加する
 
-- **サービスの追加**: `services/<name>/<env>/` を必要な環境ぶん作る PR を出す。GitHub 側の設定変更は不要。
-- **環境の追加**: `services/<name>/<env>/` を作る。既存の環境からコピーして値を書き換えるのが早い。
-- **環境を外す**: ディレクトリを消せばその環境はスキップされる。
+- **サービスの追加**: `services/<name>/<env>/` にツールの定義ファイルを置く PR を出す。GitHub 側の設定変更は不要。
+- **環境の追加**: 既存の環境ディレクトリをコピーして値を書き換える。
+- **環境を外す**: ディレクトリを消す。
 
 ## セットアップ
 
 ### クラウド側 (このリポジトリの範囲外)
 
-各サービス・環境のリソース (ECS クラスター、ALB、IAM ロール、Lambda 実行ロール、Cloud Run のサービスアカウント等) は Terraform 等で用意し、その ID や ARN を各環境ディレクトリの定義に書きます。
+各サービス・環境のリソース (ECS クラスター、ALB、IAM ロール、Lambda 実行ロール等) は Terraform 等で用意し、その ID や ARN を定義ファイルに書きます。
 
-GitHub Actions 用のロールは **このリポジトリの環境を信頼する** ように設定します。
+GitHub Actions 用のデプロイロールは **環境ごとに 1 つ** で、このリポジトリの環境を信頼します。
 AWS の OIDC なら `sub` を `repo:gainings/blog-sample-release-repo:environment:<env>` に、GCP の Workload Identity なら属性条件を同様に絞ります。
 
 ### GitHub 側
 
-- **Environments** `dev` / `stg` / `prd` を作成します。変数の設定は不要です (値はすべてリポジトリ内にあります)。`prd` に Required reviewers を設定すると、承認を挟んでから本番デプロイできます。
-- **ブランチ保護**で "Require review from Code Owners" を有効にすると、`.github/CODEOWNERS` により `services/*/prd/` の変更にレビューが必須になります。
-- **GitHub App**: アプリリポジトリが dispatch に使う GitHub App をこのリポジトリにもインストールします (Contents: Read and write)。
+**Environments** `dev` / `stg` / `prd` を作成し、それぞれに variables を設定します。
+
+| 変数 | 用途 |
+|---|---|
+| `AWS_ROLE_ARN` | ECS / Lambda のデプロイに使うロール |
+| `AWS_REGION` | 同上 |
+| `GCP_WORKLOAD_IDENTITY_PROVIDER` | Cloud Run を使う場合 |
+| `GCP_SERVICE_ACCOUNT` | 同上 |
+| `GCP_PROJECT_ID` | 同上 |
+| `GCP_REGION` | 同上 |
+
+使わない方式の変数は不要です。`prd` に Required reviewers を設定すると、PR マージ後さらに承認を挟めます。
+
+**ブランチ保護 (main)**: "Require review from Code Owners" を有効にすると `services/*/prd/` の変更にレビューが必須になります。dev / stg の PR を本当に auto-merge にするには、リポジトリ設定で "Allow auto-merge" を有効にし、`render` チェックを必須にします (未設定の場合、アプリ側 CI は即時マージにフォールバックします)。
+
+**GitHub App**: アプリリポジトリが PR を作るための GitHub App をこのリポジトリにもインストールします (Contents / Pull requests: Read and write)。
 
 ## ローカルでの確認
 
 ```sh
 scripts/render.sh blog-sample-app dev
-scripts/render.sh example-lambda prd
-scripts/render.sh example-cloudrun dev
-diff -r services/blog-sample-app/stg services/blog-sample-app/prd   # 環境差分を見る
+scripts/set-image.sh blog-sample-app dev 111111111111.dkr.ecr.ap-northeast-1.amazonaws.com/blog-sample-app:sha-abc123
+git diff   # dev/.env の IMAGE だけが変わる
 ```
 
-`yq`, `ecspresso`, `lambroll`, `envsubst` が必要です。クラウドには接続しません。
+`yq`, `jq`, `ecspresso`, `lambroll` が必要です。クラウドには接続しません。

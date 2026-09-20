@@ -1,22 +1,14 @@
 name: Deploy to ECS (ecspresso)
-description: services/<service>/<env>/ecspresso.yml を ecspresso でデプロイする
+description: <dir>/ecspresso.yml (+ ecs-task-def.json, ecs-service-def.json, .env) を ecspresso でデプロイする
 
 inputs:
-  env_dir:
+  dir:
     description: 環境ディレクトリ (services/<service>/<env>)
     required: true
-  environment:
-    description: dev | stg | prd
-    required: true
-  image:
-    description: デプロイするイメージ (registry/repository:tag)
+  aws_role_arn:
+    description: OIDC で Assume するデプロイ用ロール (GitHub Environment の variable)
     required: true
   aws_region:
-    required: true
-  aws_account_id:
-    required: true
-  aws_role_arn:
-    description: OIDC で Assume するデプロイ用ロール
     required: true
   ecspresso_version:
     required: false
@@ -37,16 +29,13 @@ runs:
     - name: ecspresso verify / diff / deploy
       shell: bash
       env:
-        ENV: ${{ inputs.environment }}
-        IMAGE: ${{ inputs.image }}
-        AWS_REGION: ${{ inputs.aws_region }}
-        AWS_ACCOUNT_ID: ${{ inputs.aws_account_id }}
-        CONFIG: ${{ inputs.env_dir }}/ecspresso.yml
+        DIR: ${{ inputs.dir }}
       run: |
         set -euo pipefail
+        e() { ecspresso --envfile "$DIR/.env" --config "$DIR/ecspresso.yml" "$@"; }
         # イメージの存在、IAM ロール、ロググループ等を事前検証する
-        ecspresso verify --config "$CONFIG"
+        e verify
         # 現在のタスク定義/サービスとの差分をログに残す
-        ecspresso diff --config "$CONFIG" || true
+        e diff || true
         # サービスが安定するまで待つ。失敗時はサーキットブレーカーが前リビジョンへ戻す
-        ecspresso deploy --config "$CONFIG"
+        e deploy

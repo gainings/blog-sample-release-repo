@@ -1,4 +1,4 @@
-# AWS / GCP に接続せず、全サービス × 全環境でデプロイ定義がレンダリングできることを確認する。
+# AWS / GCP に接続せず、全サービス × 全環境の定義がツールで読めることを確認する。
 name: CI
 
 on:
@@ -19,9 +19,7 @@ jobs:
         run: |
           set -euo pipefail
           matrix=$(
-            for f in services/*/*/env.yaml; do
-              env=$(basename "$(dirname "$f")")
-              svc=$(basename "$(dirname "$(dirname "$f")")")
+            find services -mindepth 2 -maxdepth 2 -type d | sort | while IFS=/ read -r _ svc env; do
               jq -n --arg service "$svc" --arg env "$env" '{service: $service, env: $env}'
             done | jq -cs '{include: .}'
           )

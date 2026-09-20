@@ -1,7 +1,8 @@
 # 再利用ワークフロー: 1 つのサービスを 1 つの環境にデプロイする。
-#   services/<service>/<env>/env.yaml … kind, image, 認証先 (aws / gcp), requires_release, 任意の vars
-#   services/<service>/<env>/ に kind 別の定義 … ecspresso.yml + ecs-*-def.json / function.json / service.yaml
-# kind に応じたデプロイ方式 (.github/actions/deploy-*) を呼ぶ。
+# services/<service>/<env>/ にある定義ファイルの種類でデプロイ方式を判定し (.env はイメージ等の値)、
+# 認証先は GitHub Environment (<env>) の variables から取る。
+#   AWS: AWS_ROLE_ARN, AWS_REGION
+#   GCP: GCP_WORKLOAD_IDENTITY_PROVIDER, GCP_SERVICE_ACCOUNT, GCP_PROJECT_ID, GCP_REGION
 name: Deploy (reusable)
 
 on:
@@ -13,10 +14,6 @@ on:
         type: string
       environment:
         description: "dev | stg | prd (GitHub Environments の名前と一致させる)"
-        required: true
-        type: string
-      image_tag:
-        description: "イメージタグ (例: sha-<commit sha>)"
         required: true
         type: string
 
@@ -34,83 +31,62 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Read environment manifest
-        id: manifest
+      - name: Detect kind
+        id: kind
         env:
-          SERVICE: ${{ inputs.service }}
+          DIR: services/${{ inputs.service }}/${{ inputs.environment }}
           ENVIRONMENT: ${{ inputs.environment }}
-          IMAGE_TAG: ${{ inputs.image_tag }}
+          AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          GCP_SERVICE_ACCOUNT: ${{ vars.GCP_SERVICE_ACCOUNT }}
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
         run: |
           set -euo pipefail
-          env_dir="services/${SERVICE}/${ENVIRONMENT}"
-          envf="${env_dir}/env.yaml"
-          if [ ! -d "services/${SERVICE}" ]; then
-            echo "::error::unknown service '${SERVICE}' (services/${SERVICE} not found)"; exit 1
-          fi
-          if [ ! -f "$envf" ]; then
-            echo "::error::environment '${ENVIRONMENT}' is not defined for '${SERVICE}' (${envf} not found)"; exit 1
-          fi
-          kind=$(yq '.kind' "$envf")
-          image="$(yq '.image.registry' "$envf")/$(yq '.image.repository' "$envf"):${IMAGE_TAG}"
-
+          [ -d "$DIR" ] || { echo "::error::${DIR} not found"; exit 1; }
+          kind=$(scripts/kind.sh "$DIR")
+          case "$kind" in
+            ecs|lambda)
+              for v in AWS_ROLE_ARN AWS_REGION; do
+                [ -n "${!v}" ] || { echo "::error::variable ${v} is not set on GitHub Environment '${ENVIRONMENT}'"; exit 1; }
+              done ;;
+            cloudrun)
+              for v in GCP_WORKLOAD_IDENTITY_PROVIDER GCP_SERVICE_ACCOUNT GCP_PROJECT_ID GCP_REGION; do
+                [ -n "${!v}" ] || { echo "::error::variable ${v} is not set on GitHub Environment '${ENVIRONMENT}'"; exit 1; }
+              done ;;
+          esac
+          echo "kind=${kind}" >> "$GITHUB_OUTPUT"
+          echo "dir=${DIR}" >> "$GITHUB_OUTPUT"
           {
-            echo "env_dir=${env_dir}"
-            echo "kind=${kind}"
-            echo "image=${image}"
-            echo "aws_region=$(yq '.aws.region // ""' "$envf")"
-            echo "aws_account_id=$(yq '.aws.account_id // ""' "$envf")"
-            echo "aws_role_arn=$(yq '.aws.role_arn // ""' "$envf")"
-            echo "gcp_project_id=$(yq '.gcp.project_id // ""' "$envf")"
-            echo "gcp_region=$(yq '.gcp.region // ""' "$envf")"
-            echo "gcp_workload_identity_provider=$(yq '.gcp.workload_identity_provider // ""' "$envf")"
-            echo "gcp_service_account=$(yq '.gcp.service_account // ""' "$envf")"
-          } >> "$GITHUB_OUTPUT"
-
-          # env.yaml の vars (任意) をデプロイ定義のテンプレート用に環境変数として渡す
-          yq '.vars // {} | to_entries[] | .key + "=" + (.value | tostring)' "$envf" >> "$GITHUB_ENV"
-
-          {
-            echo "### ${SERVICE} → ${ENVIRONMENT}"
-            echo "- kind: \`${kind}\`"
-            echo "- image: \`${image}\`"
-            echo "- definitions: \`${env_dir}/\`"
+            echo "### ${{ inputs.service }} → ${ENVIRONMENT} (${kind})"
+            echo '```'
+            grep -v '^#' "$DIR/.env"
+            echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Deploy (ecs)
-        if: steps.manifest.outputs.kind == 'ecs'
+        if: steps.kind.outputs.kind == 'ecs'
         uses: ./.github/actions/deploy-ecs
         with:
-          env_dir: ${{ steps.manifest.outputs.env_dir }}
-          environment: ${{ inputs.environment }}
-          image: ${{ steps.manifest.outputs.image }}
-          aws_region: ${{ steps.manifest.outputs.aws_region }}
-          aws_account_id: ${{ steps.manifest.outputs.aws_account_id }}
-          aws_role_arn: ${{ steps.manifest.outputs.aws_role_arn }}
+          dir: ${{ steps.kind.outputs.dir }}
+          aws_role_arn: ${{ vars.AWS_ROLE_ARN }}
+          aws_region: ${{ vars.AWS_REGION }}
 
       - name: Deploy (lambda)
-        if: steps.manifest.outputs.kind == 'lambda'
+        if: steps.kind.outputs.kind == 'lambda'
         uses: ./.github/actions/deploy-lambda
         with:
-          env_dir: ${{ steps.manifest.outputs.env_dir }}
-          environment: ${{ inputs.environment }}
-          image: ${{ steps.manifest.outputs.image }}
-          aws_region: ${{ steps.manifest.outputs.aws_region }}
-          aws_account_id: ${{ steps.manifest.outputs.aws_account_id }}
-          aws_role_arn: ${{ steps.manifest.outputs.aws_role_arn }}
+          dir: ${{ steps.kind.outputs.dir }}
+          aws_role_arn: ${{ vars.AWS_ROLE_ARN }}
+          aws_region: ${{ vars.AWS_REGION }}
 
       - name: Deploy (cloudrun)
-        if: steps.manifest.outputs.kind == 'cloudrun'
+        if: steps.kind.outputs.kind == 'cloudrun'
         uses: ./.github/actions/deploy-cloudrun
         with:
-          env_dir: ${{ steps.manifest.outputs.env_dir }}
-          environment: ${{ inputs.environment }}
-          image: ${{ steps.manifest.outputs.image }}
-          gcp_project_id: ${{ steps.manifest.outputs.gcp_project_id }}
-          gcp_region: ${{ steps.manifest.outputs.gcp_region }}
-          gcp_workload_identity_provider: ${{ steps.manifest.outputs.gcp_workload_identity_provider }}
-          gcp_service_account: ${{ steps.manifest.outputs.gcp_service_account }}
-
-      - name: Unknown kind
-        if: ${{ !contains(fromJSON('["ecs","lambda","cloudrun"]'), steps.manifest.outputs.kind) }}
-        run: |
-          echo "::error::unsupported kind '${{ steps.manifest.outputs.kind }}'"; exit 1
+          dir: ${{ steps.kind.outputs.dir }}
+          gcp_project_id: ${{ vars.GCP_PROJECT_ID }}
+          gcp_region: ${{ vars.GCP_REGION }}
+          gcp_workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          gcp_service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
