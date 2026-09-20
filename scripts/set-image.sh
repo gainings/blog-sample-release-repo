@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# 環境ディレクトリの .env にある IMAGE を差し替える。アプリリポジトリの CI がこのスクリプトを呼んで PR を作る。
-# デプロイ方式によらず .env の 1 行を書き換えるだけ。安全のため、同じリポジトリ (registry/repository) への更新だけを受け付ける。
+# 環境ディレクトリの envfile にある IMAGE を差し替える。アプリリポジトリの CI がこのスクリプトを呼んで PR を作る。
+# デプロイ方式によらず envfile の 1 行を書き換えるだけ。安全のため、同じリポジトリ (registry/repository) への更新だけを受け付ける。
 #   scripts/set-image.sh <service> <env> <registry/repository:tag>
 set -euo pipefail
 service="${1:?usage: $0 <service> <env> <image>}"
 env_name="${2:?usage: $0 <service> <env> <image>}"
 image="${3:?usage: $0 <service> <env> <image>}"
-f="services/${service}/${env_name}/.env"
+f="services/${service}/${env_name}/envfile"
 [ -f "$f" ] || { echo "no such environment: ${f}" >&2; exit 1; }
 
 current=$(sed -n 's/^IMAGE=//p' "$f" | tail -n 1)

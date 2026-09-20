@@ -1,5 +1,5 @@
 name: Deploy to Cloud Run (gcloud)
-description: <dir>/service.yaml を .env で envsubst し、gcloud run services replace で適用する
+description: <dir>/service.yaml を envfile で envsubst し、gcloud run services replace で適用する
 
 inputs:
   dir:
@@ -33,7 +33,7 @@ runs:
         REGION: ${{ inputs.gcp_region }}
       run: |
         set -euo pipefail
-        set -a; . "$DIR/.env"; set +a
+        set -a; . "$DIR/envfile"; set +a
         envsubst < "$DIR/service.yaml" > "$RUNNER_TEMP/service.yaml"
         cat "$RUNNER_TEMP/service.yaml"
         # replace は新リビジョンが Ready になるまで待つ。失敗時はトラフィックが移らない

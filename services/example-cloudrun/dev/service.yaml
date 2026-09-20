@@ -1,4 +1,4 @@
-# Knative Service 形式。${IMAGE} は同じディレクトリの .env を読み込んだ envsubst で置換される。
+# Knative Service 形式。${IMAGE} は同じディレクトリの envfile を読み込んだ envsubst で置換される。
 apiVersion: serving.knative.dev/v1
 kind: Service
 metadata:

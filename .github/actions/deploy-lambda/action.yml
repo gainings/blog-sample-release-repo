@@ -1,5 +1,5 @@
 name: Deploy to Lambda (lambroll)
-description: <dir>/function.json (+ .env) を lambroll でデプロイする (コンテナイメージ)
+description: <dir>/function.json (+ envfile) を lambroll でデプロイする (コンテナイメージ)
 
 inputs:
   dir:
@@ -31,7 +31,7 @@ runs:
         DIR: ${{ inputs.dir }}
       run: |
         set -euo pipefail
-        l() { lambroll --envfile "$DIR/.env" "$@" --function "$DIR/function.json"; }
+        l() { lambroll --envfile "$DIR/envfile" "$@" --function "$DIR/function.json"; }
         l diff || true
         # 新しいバージョンを publish し、エイリアス current を付け替える
         l deploy

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 定義ファイルを .env と合わせてツールに読ませ、構文と内容を確認する (クラウドには接続しない)。CI とローカルの両方から使う。
+# 定義ファイルを envfile と合わせてツールに読ませ、構文と内容を確認する (クラウドには接続しない)。CI とローカルの両方から使う。
 #   scripts/render.sh <service> <env>
 set -euo pipefail
 service="${1:?usage: $0 <service> <env>}"
@@ -16,15 +16,15 @@ export AWS_REGION="${AWS_REGION:-ap-northeast-1}"
 echo "==> ${service} / ${env_name} (${kind})"
 case "$kind" in
   ecs)
-    ecspresso --envfile "${dir}/.env" --config "${dir}/ecspresso.yml" render config
-    ecspresso --envfile "${dir}/.env" --config "${dir}/ecspresso.yml" render task-definition
-    ecspresso --envfile "${dir}/.env" --config "${dir}/ecspresso.yml" render service-definition
+    ecspresso --envfile "${dir}/envfile" --config "${dir}/ecspresso.yml" render config
+    ecspresso --envfile "${dir}/envfile" --config "${dir}/ecspresso.yml" render task-definition
+    ecspresso --envfile "${dir}/envfile" --config "${dir}/ecspresso.yml" render service-definition
     ;;
   lambda)
-    lambroll --envfile "${dir}/.env" render --function "${dir}/function.json"
+    lambroll --envfile "${dir}/envfile" render --function "${dir}/function.json"
     ;;
   cloudrun)
-    set -a; . "${dir}/.env"; set +a
+    set -a; . "${dir}/envfile"; set +a
     envsubst < "${dir}/service.yaml" | tee /dev/stderr | yq -e '.spec.template.spec.containers[0].image | test(":")' >/dev/null
     ;;
 esac
