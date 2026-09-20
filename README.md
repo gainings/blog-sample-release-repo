@@ -112,6 +112,8 @@ AWS の OIDC なら `sub` を `repo:gainings/blog-sample-release-repo:environmen
 
 使わない方式の変数は不要です。`prd` に Required reviewers を設定すると、PR マージ後さらに承認を挟めます。
 
+クラウドを用意せずに流れだけ確認したい場合は、Environment の variable に `DRY_RUN=true` を設定します。認証もデプロイもせず、定義のレンダリングだけを行って成功します (ログとサマリーに DRY RUN と明記されます)。
+
 **ブランチ保護 (main)**: "Require review from Code Owners" を有効にすると `services/*/prd/` の変更にレビューが必須になります。dev / stg の PR を本当に auto-merge にするには、リポジトリ設定で "Allow auto-merge" を有効にし、`render` チェックを必須にします (未設定の場合、アプリ側 CI は即時マージにフォールバックします)。
 
 **GitHub App**: アプリリポジトリが PR を作るための GitHub App をこのリポジトリにもインストールします (Contents / Pull requests: Read and write)。

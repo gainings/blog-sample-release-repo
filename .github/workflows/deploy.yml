@@ -3,6 +3,7 @@
 # 認証先は GitHub Environment (<env>) の variables から取る。
 #   AWS: AWS_ROLE_ARN, AWS_REGION
 #   GCP: GCP_WORKLOAD_IDENTITY_PROVIDER, GCP_SERVICE_ACCOUNT, GCP_PROJECT_ID, GCP_REGION
+# Environment の variable に DRY_RUN=true があれば、認証もデプロイもせず定義のレンダリングだけ行う (フローの確認用)。
 name: Deploy (reusable)
 
 on:
@@ -42,11 +43,13 @@ jobs:
           GCP_SERVICE_ACCOUNT: ${{ vars.GCP_SERVICE_ACCOUNT }}
           GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
           GCP_REGION: ${{ vars.GCP_REGION }}
+          DRY_RUN: ${{ vars.DRY_RUN }}
         run: |
           set -euo pipefail
           [ -d "$DIR" ] || { echo "::error::${DIR} not found"; exit 1; }
           kind=$(scripts/kind.sh "$DIR")
-          case "$kind" in
+          [ "$DRY_RUN" = "true" ] && kind_check=skip || kind_check="$kind"
+          case "$kind_check" in
             ecs|lambda)
               for v in AWS_ROLE_ARN AWS_REGION; do
                 [ -n "${!v}" ] || { echo "::error::variable ${v} is not set on GitHub Environment '${ENVIRONMENT}'"; exit 1; }
@@ -59,14 +62,30 @@ jobs:
           echo "kind=${kind}" >> "$GITHUB_OUTPUT"
           echo "dir=${DIR}" >> "$GITHUB_OUTPUT"
           {
-            echo "### ${{ inputs.service }} → ${ENVIRONMENT} (${kind})"
+            echo "### ${{ inputs.service }} → ${ENVIRONMENT} (${kind})${DRY_RUN:+ — DRY RUN, not deployed}"
             echo '```'
             grep -v '^#' "$DIR/.env"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # ---- DRY_RUN: レンダリングだけ行う ----
+      - uses: kayac/ecspresso@v2
+        if: vars.DRY_RUN == 'true' && steps.kind.outputs.kind == 'ecs'
+        with:
+          version: v2.8.5
+      - uses: fujiwara/lambroll@v1
+        if: vars.DRY_RUN == 'true' && steps.kind.outputs.kind == 'lambda'
+        with:
+          version: v1.5.3
+      - name: Dry run (render only)
+        if: vars.DRY_RUN == 'true'
+        run: |
+          echo "::warning::DRY_RUN is set on environment '${{ inputs.environment }}': rendering only, nothing is deployed"
+          scripts/render.sh "${{ inputs.service }}" "${{ inputs.environment }}"
+
+      # ---- 本番の経路 ----
       - name: Deploy (ecs)
-        if: steps.kind.outputs.kind == 'ecs'
+        if: vars.DRY_RUN != 'true' && steps.kind.outputs.kind == 'ecs'
         uses: ./.github/actions/deploy-ecs
         with:
           dir: ${{ steps.kind.outputs.dir }}
@@ -74,7 +93,7 @@ jobs:
           aws_region: ${{ vars.AWS_REGION }}
 
       - name: Deploy (lambda)
-        if: steps.kind.outputs.kind == 'lambda'
+        if: vars.DRY_RUN != 'true' && steps.kind.outputs.kind == 'lambda'
         uses: ./.github/actions/deploy-lambda
         with:
           dir: ${{ steps.kind.outputs.dir }}
@@ -82,7 +101,7 @@ jobs:
           aws_region: ${{ vars.AWS_REGION }}
 
       - name: Deploy (cloudrun)
-        if: steps.kind.outputs.kind == 'cloudrun'
+        if: vars.DRY_RUN != 'true' && steps.kind.outputs.kind == 'cloudrun'
         uses: ./.github/actions/deploy-cloudrun
         with:
           dir: ${{ steps.kind.outputs.dir }}
