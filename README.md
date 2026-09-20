@@ -4,7 +4,7 @@
 **main にあるものがリリースされているもの**、という状態を保ちます。
 
 - アプリリポジトリは、イメージをビルドしたらこのリポジトリの定義ファイル内のイメージを書き換える PR を作ります。
-- この main に入った変更は、変更のあった環境ディレクトリだけが dev → stg → prd の順に自動で適用されます。
+- この main に入った変更は、変更のあった環境ディレクトリがそのまま適用されます。リリース側は環境の順序付けをしません。
 - ワークフローに入力はありません。ロールバックは `git revert` です。
 
 ## 考え方
@@ -14,6 +14,7 @@
 - **イメージは各環境の `.env` に書いてある**: `IMAGE=registry/repo:tag` の 1 行。ecspresso と lambroll は `--envfile` でこれを読み、定義内の `{{ must_env `IMAGE` }}` に入る。Cloud Run は `.env` を読み込んでから `service.yaml` を `envsubst` する。方式が違っても「イメージを更新する」操作は `.env` の 1 行の書き換えで済む。
 - **認証先だけ GitHub Environments に置く**: 環境ごとに 1 つのデプロイ用ロール (AWS) / サービスアカウント (GCP)。OIDC の `sub` 条件を `environment:<env>` に絞れる。
 - **どこでも同じイメージ**: dev / stg / prd に同じイメージ (同じダイジェスト) が入る。再ビルドはしない。
+- **環境の区別をしない**: main に入った変更を、変更のあったディレクトリぶんだけ並列に適用する。「dev の後に stg」「タグが切られたら prd」といった順序は、アプリ側が **いつ main に入れるか** で表現する (dev / stg は即時 auto-merge、prd はタグ作成時の PR を人がマージ)。環境名は GitHub Environment (認証先、承認ルール) の参照にだけ使う。
 
 ```mermaid
 flowchart LR
@@ -23,11 +24,11 @@ flowchart LR
     B -->|PR: dev, stg の image を更新<br/>auto-merge| M[(main)]
     T -->|タグ作成時のみ<br/>PR: prd の image を更新<br/>手動マージ| M
     subgraph rel[blog-sample-release-repo]
-        M --> C[changes<br/>変更のあった環境を検出] --> D[dev] --> S[stg] --> P[prd]
+        M --> C[changes<br/>変更のあった services/名/環境 を検出] --> X[deploy × 変更ぶん<br/>並列]
     end
-    D & S & P -->|ecspresso.yml| ECS[ECS]
-    D & S & P -->|function.json| LMB[Lambda]
-    D & S & P -->|service.yaml| CR[Cloud Run]
+    X -->|ecspresso.yml| ECS[ECS]
+    X -->|function.json| LMB[Lambda]
+    X -->|service.yaml| CR[Cloud Run]
 ```
 
 ## ディレクトリ構成
@@ -57,7 +58,7 @@ flowchart LR
     ├── CODEOWNERS                       # services/*/prd/ のレビュー必須化
     ├── actions/deploy-{ecs,lambda,cloudrun}/
     └── workflows/
-        ├── release.yml                  # main push: 変更のあった環境を dev → stg → prd
+        ├── release.yml                  # main push: 変更のあった services/名/環境 をすべて適用
         ├── deploy.yml                   # 再利用: 1 サービス × 1 環境
         └── ci.yml                       # PR: 全サービス × 全環境の render
 ```
@@ -65,7 +66,7 @@ flowchart LR
 ## リリースの流れ
 
 1. **アプリの main にマージ** → アプリ側 CI がイメージを `sha-<commit>` で push し、`scripts/set-image.sh` で `dev/.env` と `stg/.env` の `IMAGE` を書き換える PR をこのリポジトリに作り、auto-merge する。
-2. **この main に入る** → `release.yml` が変更のあった `services/<name>/<env>/` を検出し、dev → stg の順にデプロイする。
+2. **この main に入る** → `release.yml` が変更のあった `services/<name>/<env>/` を検出し、それぞれに適用する (この例では dev と stg)。
 3. **アプリ側で tagpr のリリース PR をマージ** → タグ (CalVer) が作られ、アプリ側 CI が `prd/.env` の `IMAGE` をそのタグに書き換える PR を作る。これは auto-merge しない。
 4. **prd の PR をマージ** (CODEOWNERS のレビュー) → `release.yml` が prd にデプロイする。これが本番リリース。
 5. **戻したいとき** → 該当コミットを `git revert` した PR をマージする。前の image に戻る。
