@@ -1,9 +1,9 @@
 # 各アプリリポジトリからの repository_dispatch (event_type: deploy) を受けてデプロイする。
 #
-#   params ──> deploy-dev ──> deploy-stg ──> deploy-prod
+#   params ──> deploy-dev ──> deploy-stg ──> deploy-prd
 #
-# - どの環境にデプロイするかは services/<service>/service.yaml の environments で決まる (未定義の環境はスキップ)
-# - requires_release: true の環境は、payload に release_tag がある時だけデプロイされる
+# - どの環境にデプロイするかは services/<service>/<env>/env.yaml の有無で決まる (無い環境はスキップ)
+# - env.yaml で requires_release: true の環境は、payload に release_tag がある時だけデプロイされる
 # - 前段の環境が失敗したら後段には進まない
 #
 # payload:
@@ -71,13 +71,14 @@ jobs:
             echo "::error::unknown service '${SERVICE}' (${m} not found)"; exit 1
           fi
 
-          # デプロイ対象の環境を dev → stg → prod の順で決める
+          # デプロイ対象の環境を dev → stg → prd の順で決める (env.yaml があるものだけ)
           targets=()
-          for env in dev stg prod; do
-            if [ "$(yq ".environments.${env} != null" "$m")" != "true" ]; then
+          for env in dev stg prd; do
+            envf="services/${SERVICE}/${env}/env.yaml"
+            if [ ! -f "$envf" ]; then
               continue
             fi
-            if [ "$(yq ".environments.${env}.requires_release // false" "$m")" = "true" ] && [ -z "$RELEASE_TAG" ]; then
+            if [ "$(yq '.requires_release // false' "$envf")" = "true" ] && [ -z "$RELEASE_TAG" ]; then
               echo "skip ${env}: requires_release but no release_tag"
               continue
             fi
@@ -129,14 +130,14 @@ jobs:
       environment: stg
       image_tag: ${{ needs.params.outputs.image_tag }}
 
-  deploy-prod:
+  deploy-prd:
     needs: [params, deploy-dev, deploy-stg]
-    if: ${{ !cancelled() && !failure() && contains(fromJSON(needs.params.outputs.targets), 'prod') }}
+    if: ${{ !cancelled() && !failure() && contains(fromJSON(needs.params.outputs.targets), 'prd') }}
     permissions:
       id-token: write
       contents: read
     uses: ./.github/workflows/deploy.yml
     with:
       service: ${{ needs.params.outputs.service }}
-      environment: prod
+      environment: prd
       image_tag: ${{ needs.params.outputs.image_tag }}

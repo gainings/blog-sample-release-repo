@@ -1,9 +1,0 @@
-# ecspresso 設定。ENV (dev|stg|prod) と AWS_REGION を環境変数で受け取り、
-# 1 セットの定義ファイルを全環境で使い回す。
-required_version: ">= 2.0.0"
-region: "{{ must_env `AWS_REGION` }}"
-cluster: "blog-sample-{{ must_env `ENV` }}"
-service: blog-sample-app
-service_definition: ecs-service-def.json
-task_definition: ecs-task-def.json
-timeout: 10m

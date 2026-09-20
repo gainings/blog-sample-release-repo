@@ -1,0 +1,22 @@
+{
+  "FunctionName": "example-lambda-dev",
+  "PackageType": "Image",
+  "Code": {
+    "ImageUri": "{{ must_env `IMAGE` }}"
+  },
+  "Role": "arn:aws:iam::111111111111:role/example-lambda-dev-exec",
+  "Architectures": [
+    "x86_64"
+  ],
+  "MemorySize": 256,
+  "Timeout": 30,
+  "Environment": {
+    "Variables": {
+      "APP_ENV": "dev"
+    }
+  },
+  "Tags": {
+    "Environment": "dev",
+    "ManagedBy": "lambroll"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "FunctionName": "example-lambda-prd",
+  "PackageType": "Image",
+  "Code": {
+    "ImageUri": "{{ must_env `IMAGE` }}"
+  },
+  "Role": "arn:aws:iam::333333333333:role/example-lambda-prd-exec",
+  "Architectures": [
+    "x86_64"
+  ],
+  "MemorySize": 512,
+  "Timeout": 30,
+  "Environment": {
+    "Variables": {
+      "APP_ENV": "prd"
+    }
+  },
+  "Tags": {
+    "Environment": "prd",
+    "ManagedBy": "lambroll"
+  }
+}

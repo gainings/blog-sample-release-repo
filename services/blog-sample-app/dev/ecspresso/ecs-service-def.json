@@ -1,10 +1,15 @@
 {
   "launchType": "FARGATE",
   "platformVersion": "LATEST",
-  "desiredCount": {{ env `DESIRED_COUNT` `1` }},
-  "deploymentController": { "type": "ECS" },
+  "desiredCount": 1,
+  "deploymentController": {
+    "type": "ECS"
+  },
   "deploymentConfiguration": {
-    "deploymentCircuitBreaker": { "enable": true, "rollback": true },
+    "deploymentCircuitBreaker": {
+      "enable": true,
+      "rollback": true
+    },
     "maximumPercent": 200,
     "minimumHealthyPercent": 100
   },
@@ -14,24 +19,30 @@
     {
       "containerName": "app",
       "containerPort": 8080,
-      "targetGroupArn": "{{ must_env `TARGET_GROUP_ARN` }}"
+      "targetGroupArn": "arn:aws:elasticloadbalancing:ap-northeast-1:111111111111:targetgroup/blog-sample-app-dev/0123456789abcdef"
     }
   ],
   "networkConfiguration": {
     "awsvpcConfiguration": {
       "assignPublicIp": "DISABLED",
       "subnets": [
-        "{{ must_env `SUBNET_ID_1` }}",
-        "{{ must_env `SUBNET_ID_2` }}"
+        "subnet-0dev000000000001",
+        "subnet-0dev000000000002"
       ],
       "securityGroups": [
-        "{{ must_env `SECURITY_GROUP_ID` }}"
+        "sg-0dev00000000000"
       ]
     }
   },
   "propagateTags": "SERVICE",
   "tags": [
-    { "key": "Environment", "value": "{{ must_env `ENV` }}" },
-    { "key": "ManagedBy", "value": "ecspresso" }
+    {
+      "key": "Environment",
+      "value": "dev"
+    },
+    {
+      "key": "ManagedBy",
+      "value": "ecspresso"
+    }
   ]
 }

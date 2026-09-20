@@ -1,0 +1,47 @@
+{
+  "family": "blog-sample-app-dev",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": [
+    "FARGATE"
+  ],
+  "cpu": "256",
+  "memory": "512",
+  "runtimePlatform": {
+    "cpuArchitecture": "X86_64",
+    "operatingSystemFamily": "LINUX"
+  },
+  "executionRoleArn": "arn:aws:iam::111111111111:role/blog-sample-app-dev-task-execution",
+  "taskRoleArn": "arn:aws:iam::111111111111:role/blog-sample-app-dev-task",
+  "containerDefinitions": [
+    {
+      "name": "app",
+      "image": "{{ must_env `IMAGE` }}",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8080,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "APP_ENV",
+          "value": "dev"
+        },
+        {
+          "name": "PORT",
+          "value": "8080"
+        }
+      ],
+      "stopTimeout": 30,
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/blog-sample-app-dev",
+          "awslogs-region": "ap-northeast-1",
+          "awslogs-stream-prefix": "app"
+        }
+      }
+    }
+  ]
+}

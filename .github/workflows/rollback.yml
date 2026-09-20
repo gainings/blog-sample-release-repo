@@ -13,7 +13,7 @@ on:
         description: "Target environment"
         required: true
         type: choice
-        options: [dev, stg, prod]
+        options: [dev, stg, prd]
       image_tag:
         description: "Image tag to deploy (sha-<commit sha> or vYYYY.MMDD.N)"
         required: true

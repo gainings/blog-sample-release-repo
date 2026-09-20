@@ -1,5 +1,8 @@
 # 再利用ワークフロー: 1 つのサービスを 1 つの環境にデプロイする。
-# services/<service>/service.yaml を読み、kind に応じたデプロイ方式 (.github/actions/deploy-*) を呼ぶ。
+#   services/<service>/service.yaml  … kind とイメージ (環境に依存しない)
+#   services/<service>/<env>/env.yaml … その環境の認証先 (aws / gcp) と任意の vars
+#   services/<service>/<env>/<kind 別の定義> … ecspresso/ lambroll/ cloudrun/
+# kind に応じたデプロイ方式 (.github/actions/deploy-*) を呼ぶ。
 name: Deploy (reusable)
 
 on:
@@ -10,7 +13,7 @@ on:
         required: true
         type: string
       environment:
-        description: "dev | stg | prod (GitHub Environments の名前と一致させる)"
+        description: "dev | stg | prd (GitHub Environments の名前と一致させる)"
         required: true
         type: string
       image_tag:
@@ -32,7 +35,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Read service manifest
+      - name: Read service / environment manifests
         id: manifest
         env:
           SERVICE: ${{ inputs.service }}
@@ -40,44 +43,46 @@ jobs:
           IMAGE_TAG: ${{ inputs.image_tag }}
         run: |
           set -euo pipefail
-          dir="services/${SERVICE}"
-          m="${dir}/service.yaml"
-          if [ ! -f "$m" ]; then
-            echo "::error::unknown service '${SERVICE}' (${m} not found)"; exit 1
+          svc="services/${SERVICE}/service.yaml"
+          env_dir="services/${SERVICE}/${ENVIRONMENT}"
+          envf="${env_dir}/env.yaml"
+          if [ ! -f "$svc" ]; then
+            echo "::error::unknown service '${SERVICE}' (${svc} not found)"; exit 1
           fi
-          if [ "$(yq ".environments.${ENVIRONMENT} != null" "$m")" != "true" ]; then
-            echo "::error::environment '${ENVIRONMENT}' is not defined in ${m}"; exit 1
+          if [ ! -f "$envf" ]; then
+            echo "::error::environment '${ENVIRONMENT}' is not defined for '${SERVICE}' (${envf} not found)"; exit 1
           fi
-          kind=$(yq '.kind' "$m")
-          image="$(yq '.image.registry' "$m")/$(yq '.image.repository' "$m"):${IMAGE_TAG}"
+          kind=$(yq '.kind' "$svc")
+          image="$(yq '.image.registry' "$svc")/$(yq '.image.repository' "$svc"):${IMAGE_TAG}"
 
           {
-            echo "service_dir=${dir}"
+            echo "env_dir=${env_dir}"
             echo "kind=${kind}"
             echo "image=${image}"
-            echo "aws_region=$(yq ".environments.${ENVIRONMENT}.aws.region // \"\"" "$m")"
-            echo "aws_account_id=$(yq ".environments.${ENVIRONMENT}.aws.account_id // \"\"" "$m")"
-            echo "aws_role_arn=$(yq ".environments.${ENVIRONMENT}.aws.role_arn // \"\"" "$m")"
-            echo "gcp_project_id=$(yq ".environments.${ENVIRONMENT}.gcp.project_id // \"\"" "$m")"
-            echo "gcp_region=$(yq ".environments.${ENVIRONMENT}.gcp.region // \"\"" "$m")"
-            echo "gcp_workload_identity_provider=$(yq ".environments.${ENVIRONMENT}.gcp.workload_identity_provider // \"\"" "$m")"
-            echo "gcp_service_account=$(yq ".environments.${ENVIRONMENT}.gcp.service_account // \"\"" "$m")"
+            echo "aws_region=$(yq '.aws.region // ""' "$envf")"
+            echo "aws_account_id=$(yq '.aws.account_id // ""' "$envf")"
+            echo "aws_role_arn=$(yq '.aws.role_arn // ""' "$envf")"
+            echo "gcp_project_id=$(yq '.gcp.project_id // ""' "$envf")"
+            echo "gcp_region=$(yq '.gcp.region // ""' "$envf")"
+            echo "gcp_workload_identity_provider=$(yq '.gcp.workload_identity_provider // ""' "$envf")"
+            echo "gcp_service_account=$(yq '.gcp.service_account // ""' "$envf")"
           } >> "$GITHUB_OUTPUT"
 
-          # environments.<env>.vars をデプロイ定義のテンプレート用に環境変数として渡す
-          yq ".environments.${ENVIRONMENT}.vars // {} | to_entries[] | .key + \"=\" + (.value | tostring)" "$m" >> "$GITHUB_ENV"
+          # env.yaml の vars (任意) をデプロイ定義のテンプレート用に環境変数として渡す
+          yq '.vars // {} | to_entries[] | .key + "=" + (.value | tostring)' "$envf" >> "$GITHUB_ENV"
 
           {
             echo "### ${SERVICE} → ${ENVIRONMENT}"
             echo "- kind: \`${kind}\`"
             echo "- image: \`${image}\`"
+            echo "- definitions: \`${env_dir}/\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Deploy (ecs)
         if: steps.manifest.outputs.kind == 'ecs'
         uses: ./.github/actions/deploy-ecs
         with:
-          service_dir: ${{ steps.manifest.outputs.service_dir }}
+          env_dir: ${{ steps.manifest.outputs.env_dir }}
           environment: ${{ inputs.environment }}
           image: ${{ steps.manifest.outputs.image }}
           aws_region: ${{ steps.manifest.outputs.aws_region }}
@@ -88,7 +93,7 @@ jobs:
         if: steps.manifest.outputs.kind == 'lambda'
         uses: ./.github/actions/deploy-lambda
         with:
-          service_dir: ${{ steps.manifest.outputs.service_dir }}
+          env_dir: ${{ steps.manifest.outputs.env_dir }}
           environment: ${{ inputs.environment }}
           image: ${{ steps.manifest.outputs.image }}
           aws_region: ${{ steps.manifest.outputs.aws_region }}
@@ -99,7 +104,7 @@ jobs:
         if: steps.manifest.outputs.kind == 'cloudrun'
         uses: ./.github/actions/deploy-cloudrun
         with:
-          service_dir: ${{ steps.manifest.outputs.service_dir }}
+          env_dir: ${{ steps.manifest.outputs.env_dir }}
           environment: ${{ inputs.environment }}
           image: ${{ steps.manifest.outputs.image }}
           gcp_project_id: ${{ steps.manifest.outputs.gcp_project_id }}

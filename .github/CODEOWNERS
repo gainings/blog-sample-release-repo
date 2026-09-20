@@ -1,0 +1,3 @@
+# prd ディレクトリの変更にはレビューを必須にする例。
+# ブランチ保護で "Require review from Code Owners" を有効にすると効く。
+/services/*/prd/  @gainings

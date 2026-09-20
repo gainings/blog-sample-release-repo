@@ -1,0 +1,30 @@
+# Knative Service 形式。${IMAGE} だけ envsubst で置換される。
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: example-cloudrun-dev
+  labels:
+    environment: dev
+    managed-by: release-repo
+  annotations:
+    run.googleapis.com/ingress: internal-and-cloud-load-balancing
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "2"
+    spec:
+      containerConcurrency: 80
+      timeoutSeconds: 30
+      containers:
+        - image: ${IMAGE}
+          ports:
+            - containerPort: 8080
+          env:
+            - name: APP_ENV
+              value: dev
+          resources:
+            limits:
+              cpu: "1"
+              memory: 512Mi
