@@ -30,15 +30,15 @@ done < <(yq '.vars // {} | to_entries[] | .key + "=" + (.value | tostring)' "$en
 echo "==> ${service} (${kind}) / ${env_name} / ${IMAGE}"
 case "$kind" in
   ecs)
-    ecspresso render --config "${env_dir}/ecspresso/config.yaml" config
-    ecspresso render --config "${env_dir}/ecspresso/config.yaml" task-definition
-    ecspresso render --config "${env_dir}/ecspresso/config.yaml" service-definition
+    ecspresso render --config "${env_dir}/ecspresso.yml" config
+    ecspresso render --config "${env_dir}/ecspresso.yml" task-definition
+    ecspresso render --config "${env_dir}/ecspresso.yml" service-definition
     ;;
   lambda)
-    lambroll render --function "${env_dir}/lambroll/function.json"
+    lambroll render --function "${env_dir}/function.json"
     ;;
   cloudrun)
-    envsubst < "${env_dir}/cloudrun/service.yaml" | tee /dev/stderr | yq -e '.spec.template.spec.containers[0].image' >/dev/null
+    envsubst < "${env_dir}/service.yaml" | tee /dev/stderr | yq -e '.spec.template.spec.containers[0].image' >/dev/null
     ;;
   *)
     echo "unsupported kind: ${kind}" >&2; exit 1

@@ -1,5 +1,5 @@
 name: Deploy to ECS (ecspresso)
-description: services/<service>/<env>/ecspresso/ の定義を ecspresso でデプロイする
+description: services/<service>/<env>/ecspresso.yml を ecspresso でデプロイする
 
 inputs:
   env_dir:
@@ -41,7 +41,7 @@ runs:
         IMAGE: ${{ inputs.image }}
         AWS_REGION: ${{ inputs.aws_region }}
         AWS_ACCOUNT_ID: ${{ inputs.aws_account_id }}
-        CONFIG: ${{ inputs.env_dir }}/ecspresso/config.yaml
+        CONFIG: ${{ inputs.env_dir }}/ecspresso.yml
       run: |
         set -euo pipefail
         # イメージの存在、IAM ロール、ロググループ等を事前検証する

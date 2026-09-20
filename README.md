@@ -37,15 +37,17 @@ flowchart LR
 │   ├── blog-sample-app/                 # 実サービス (ECS)
 │   │   ├── dev/
 │   │   │   ├── env.yaml                 # kind, image, aws (region / account_id / role_arn), requires_release
-│   │   │   └── ecspresso/               # config.yaml, ecs-task-def.json, ecs-service-def.json
+│   │   │   ├── ecspresso.yml            # ecspresso 設定
+│   │   │   ├── ecs-task-def.json
+│   │   │   └── ecs-service-def.json
 │   │   ├── stg/ …
 │   │   └── prd/ …                       # requires_release: true
 │   ├── example-lambda/                  # 例 (Lambda)
-│   │   ├── dev/{env.yaml, lambroll/function.json}
-│   │   └── prd/{env.yaml, lambroll/function.json}
+│   │   ├── dev/{env.yaml, function.json}
+│   │   └── prd/{env.yaml, function.json}
 │   └── example-cloudrun/                # 例 (Cloud Run)
-│       ├── dev/{env.yaml, cloudrun/service.yaml}
-│       └── prd/{env.yaml, cloudrun/service.yaml}
+│       ├── dev/{env.yaml, service.yaml}
+│       └── prd/{env.yaml, service.yaml}
 ├── scripts/render.sh                    # 定義をダミー値でレンダリング (CI / ローカル共用)
 └── .github/
     ├── CODEOWNERS                       # services/*/prd/ のレビュー必須化の例
@@ -63,7 +65,7 @@ flowchart LR
 ## マニフェスト: services/&lt;name&gt;/&lt;env&gt;/env.yaml
 
 ```yaml
-kind: ecs                    # ecs | lambda | cloudrun (同じディレクトリの定義と対応)
+kind: ecs                    # ecs | lambda | cloudrun (同じディレクトリに置く定義の種類)
 requires_release: true       # release_tag 付きの dispatch でだけデプロイ (prd 向け)
 
 image:                       # デプロイするイメージ (タグは dispatch の image_tag)
@@ -83,7 +85,7 @@ aws:                         # kind が ecs / lambda の場合
 #   FOO: bar
 ```
 
-デプロイ定義は同じディレクトリに置きます。定義の中で差し替えるのは基本的にイメージだけで、ecspresso / lambroll では `{{ must_env `IMAGE` }}`、Cloud Run の `service.yaml` では `${IMAGE}` と書きます。`ENV`, `AWS_REGION`, `AWS_ACCOUNT_ID` と `vars` の各キーも環境変数として使えます。
+デプロイ定義は `env.yaml` と同じディレクトリに直接置きます (`ecs` は `ecspresso.yml` + `ecs-task-def.json` + `ecs-service-def.json`、`lambda` は `function.json`、`cloudrun` は `service.yaml`)。定義の中で差し替えるのは基本的にイメージだけで、ecspresso / lambroll では `{{ must_env `IMAGE` }}`、Cloud Run の `service.yaml` では `${IMAGE}` と書きます。`ENV`, `AWS_REGION`, `AWS_ACCOUNT_ID` と `vars` の各キーも環境変数として使えます。
 
 ## デプロイ方式ごとの動き
 

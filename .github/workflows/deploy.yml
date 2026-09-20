@@ -1,6 +1,6 @@
 # 再利用ワークフロー: 1 つのサービスを 1 つの環境にデプロイする。
 #   services/<service>/<env>/env.yaml … kind, image, 認証先 (aws / gcp), requires_release, 任意の vars
-#   services/<service>/<env>/<kind 別の定義> … ecspresso/ lambroll/ cloudrun/
+#   services/<service>/<env>/ に kind 別の定義 … ecspresso.yml + ecs-*-def.json / function.json / service.yaml
 # kind に応じたデプロイ方式 (.github/actions/deploy-*) を呼ぶ。
 name: Deploy (reusable)
 

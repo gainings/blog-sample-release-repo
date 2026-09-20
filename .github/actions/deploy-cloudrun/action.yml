@@ -1,5 +1,5 @@
 name: Deploy to Cloud Run (gcloud)
-description: services/<service>/<env>/cloudrun/service.yaml を envsubst で埋めて gcloud run services replace する
+description: services/<service>/<env>/service.yaml を envsubst で埋めて gcloud run services replace する
 
 inputs:
   env_dir:
@@ -33,7 +33,7 @@ runs:
       env:
         ENV: ${{ inputs.environment }}
         IMAGE: ${{ inputs.image }}
-        SRC: ${{ inputs.env_dir }}/cloudrun/service.yaml
+        SRC: ${{ inputs.env_dir }}/service.yaml
       run: |
         set -euo pipefail
         envsubst < "$SRC" > "${RUNNER_TEMP}/service.yaml"
