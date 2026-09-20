@@ -1,5 +1,5 @@
 name: Deploy to ECS (ecspresso)
-description: <dir>/ecspresso.yml (+ ecs-task-def.json, ecs-service-def.json, envfile) を ecspresso でデプロイする
+description: <dir>/ecspresso.yml (+ ecs-task-def.json, ecs-service-def.json, .env) を ecspresso でデプロイする
 
 inputs:
   dir:
@@ -32,7 +32,7 @@ runs:
         DIR: ${{ inputs.dir }}
       run: |
         set -euo pipefail
-        e() { ecspresso --envfile "$DIR/envfile" --config "$DIR/ecspresso.yml" "$@"; }
+        e() { ecspresso --envfile "$DIR/.env" --config "$DIR/ecspresso.yml" "$@"; }
         # イメージの存在、IAM ロール、ロググループ等を事前検証する
         e verify
         # 現在のタスク定義/サービスとの差分をログに残す

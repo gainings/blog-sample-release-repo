@@ -1,5 +1,5 @@
 # 再利用ワークフロー: 1 つのサービスを 1 つの環境にデプロイする。
-# services/<service>/<env>/ にある定義ファイルの種類でデプロイ方式を判定し (envfile はイメージ等の値)、
+# services/<service>/<env>/ にある定義ファイルの種類でデプロイ方式を判定し (.env はイメージ等の値)、
 # 認証先は GitHub Environment (<env>) の variables から取る。
 #   AWS: AWS_ROLE_ARN, AWS_REGION
 #   GCP: GCP_WORKLOAD_IDENTITY_PROVIDER, GCP_SERVICE_ACCOUNT, GCP_PROJECT_ID, GCP_REGION
@@ -61,7 +61,7 @@ jobs:
           {
             echo "### ${{ inputs.service }} → ${ENVIRONMENT} (${kind})"
             echo '```'
-            grep -v '^#' "$DIR/envfile"
+            grep -v '^#' "$DIR/.env"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
