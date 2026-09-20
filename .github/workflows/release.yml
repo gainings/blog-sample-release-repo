@@ -1,8 +1,9 @@
 # main にあるものをリリースする。
 #
-# - push (main): そのコミットで変更があった services/<service>/<env>/ を dev → stg → prd の順にデプロイする。
-#   同じ環境の複数サービスは並列。前段の環境が失敗したら後段には進まない。
-# - workflow_dispatch: 引数なし。main の全サービス・全環境を再デプロイする (差分がなければ各ツールが no-op に近い)。
+# - push (main): そのコミットで変更があった services/<service>/<env>/ をすべて適用する (並列)。
+#   環境ごとの順序付けはしない。「いつ main に入るか」がそのまま「いつ適用されるか」になる
+#   (dev / stg はアプリ側の auto-merge で即時、prd はタグ作成時に作られる PR の手動マージで)。
+# - workflow_dispatch: 引数なし。main の全サービス・全環境を再適用する (差分がなければ各ツールが no-op に近い)。
 #
 # 入力は持たない。「何をどこに出すか」はすべてリポジトリの内容 (= main) で決まる。
 # ロールバックは対象コミットを git revert して main にマージする。
@@ -25,9 +26,8 @@ jobs:
     name: detect changed environments
     runs-on: ubuntu-latest
     outputs:
-      dev: ${{ steps.c.outputs.dev }}
-      stg: ${{ steps.c.outputs.stg }}
-      prd: ${{ steps.c.outputs.prd }}
+      matrix: ${{ steps.c.outputs.matrix }}
+      count: ${{ steps.c.outputs.count }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -48,12 +48,13 @@ jobs:
           # 削除された環境は対象外
           dirs=$(for d in $dirs; do [ -d "$d" ] && echo "$d" || true; done)
 
-          echo "targets:"; echo "${dirs:-  (none)}"
-          for env in dev stg prd; do
-            list=$(echo "$dirs" | awk -F/ -v e="$env" '$3 == e { print $2 }' | jq -R . | jq -cs .)
-            echo "${env}=${list}" >> "$GITHUB_OUTPUT"
-            echo "${env}: ${list}"
-          done
+          matrix=$(echo "$dirs" | awk -F/ 'NF == 3 { print $2, $3 }' \
+            | while read -r svc env; do jq -n --arg service "$svc" --arg env "$env" '{service: $service, env: $env}'; done \
+            | jq -cs '{include: .}')
+          count=$(echo "$matrix" | jq '.include | length')
+          echo "matrix=${matrix}" >> "$GITHUB_OUTPUT"
+          echo "count=${count}" >> "$GITHUB_OUTPUT"
+          echo "targets (${count}):"; echo "${dirs:-  (none)}"
           {
             echo "## Release ${GITHUB_SHA::7}"
             echo '```'
@@ -61,48 +62,16 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-  deploy-dev:
+  deploy:
     needs: changes
-    if: needs.changes.outputs.dev != '[]'
+    if: needs.changes.outputs.count != '0'
     strategy:
       fail-fast: false
-      matrix:
-        service: ${{ fromJSON(needs.changes.outputs.dev) }}
+      matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
     permissions:
       id-token: write
       contents: read
     uses: ./.github/workflows/deploy.yml
     with:
       service: ${{ matrix.service }}
-      environment: dev
-
-  deploy-stg:
-    needs: [changes, deploy-dev]
-    # dev に変更がなければスキップされた dev を飛び越えて進む。dev が失敗していたら進まない
-    if: ${{ !cancelled() && !failure() && needs.changes.outputs.stg != '[]' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        service: ${{ fromJSON(needs.changes.outputs.stg) }}
-    permissions:
-      id-token: write
-      contents: read
-    uses: ./.github/workflows/deploy.yml
-    with:
-      service: ${{ matrix.service }}
-      environment: stg
-
-  deploy-prd:
-    needs: [changes, deploy-dev, deploy-stg]
-    if: ${{ !cancelled() && !failure() && needs.changes.outputs.prd != '[]' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        service: ${{ fromJSON(needs.changes.outputs.prd) }}
-    permissions:
-      id-token: write
-      contents: read
-    uses: ./.github/workflows/deploy.yml
-    with:
-      service: ${{ matrix.service }}
-      environment: prd
+      environment: ${{ matrix.env }}

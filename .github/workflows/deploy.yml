@@ -14,7 +14,7 @@ on:
         required: true
         type: string
       environment:
-        description: "dev | stg | prd (GitHub Environments の名前と一致させる)"
+        description: "環境ディレクトリ名 (例: dev | stg | prd)。同名の GitHub Environment から認証先を取る"
         required: true
         type: string
 
