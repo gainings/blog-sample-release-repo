@@ -1,0 +1,79 @@
+# ECS へのデプロイ (ecspresso)。services/<service>/<env>/ に ecspresso.yml がある対象に使う。
+# 認証先は GitHub Environment (<env>) の variables: AWS_ROLE_ARN, AWS_REGION
+# DRY_RUN=true が設定されていれば、認証もデプロイもせず定義のレンダリングだけ行う。
+name: Deploy ECS (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      service:
+        required: true
+        type: string
+      environment:
+        required: true
+        type: string
+
+jobs:
+  deploy:
+    name: ${{ inputs.service }} → ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    concurrency:
+      group: deploy-${{ inputs.service }}-${{ inputs.environment }}
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      DIR: services/${{ inputs.service }}/${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check definitions
+        run: |
+          set -euo pipefail
+          for f in ecspresso.yml .env; do
+            [ -f "$DIR/$f" ] || { echo "::error::${DIR}/${f} not found"; exit 1; }
+          done
+          {
+            echo "### ${{ inputs.service }} → ${{ inputs.environment }} (ecs)${{ vars.DRY_RUN == 'true' && ' — DRY RUN, not deployed' || '' }}"
+            echo '```'; grep -v '^#' "$DIR/.env"; echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: kayac/ecspresso@v2
+        with:
+          version: v2.8.5
+
+      - name: Dry run (render only)
+        if: vars.DRY_RUN == 'true'
+        run: |
+          echo "::warning::DRY_RUN is set on environment '${{ inputs.environment }}': rendering only, nothing is deployed"
+          scripts/render.sh "${{ inputs.service }}" "${{ inputs.environment }}"
+
+      - name: Check credentials
+        if: vars.DRY_RUN != 'true'
+        env:
+          AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: |
+          for v in AWS_ROLE_ARN AWS_REGION; do
+            [ -n "${!v}" ] || { echo "::error::variable ${v} is not set on GitHub Environment '${{ inputs.environment }}'"; exit 1; }
+          done
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        if: vars.DRY_RUN != 'true'
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: ecspresso verify / diff / deploy
+        if: vars.DRY_RUN != 'true'
+        run: |
+          set -euo pipefail
+          e() { ecspresso --envfile "$DIR/.env" --config "$DIR/ecspresso.yml" "$@"; }
+          # イメージの存在、IAM ロール、ロググループ等を事前検証する
+          e verify
+          # 現在のタスク定義/サービスとの差分をログに残す
+          e diff || true
+          # サービスが安定するまで待つ。失敗時はサーキットブレーカーが前リビジョンへ戻す
+          e deploy

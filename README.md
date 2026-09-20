@@ -10,7 +10,7 @@
 ## 考え方
 
 - **サービス = ディレクトリ、環境 = サブディレクトリ**: `services/<name>/{dev,stg,prd}/` に、その環境のデプロイ定義を **ツールのネイティブなファイルのまま** 置く。独自のマニフェストは持たない。
-- **デプロイ方式は置いてあるファイルで決まる**: `ecspresso.yml` があれば ECS、`function.json` があれば Lambda、`service.yaml` があれば Cloud Run。
+- **デプロイ方式は置いてあるファイルで決まる**: `ecspresso.yml` があれば ECS、`function.json` があれば Lambda、`service.yaml` があれば Cloud Run。方式ごとに専用の再利用ワークフロー (`deploy-ecs.yml` / `deploy-lambda.yml` / `deploy-cloudrun.yml`) があり、認証 (AWS OIDC / GCP Workload Identity) もその中に閉じている。
 - **イメージは各環境の `.env` に書いてある**: `IMAGE=registry/repo:tag` の形の行。サイドカーがあれば `IMAGE_NGINX=...` のように行を増やす (変数名は自由)。ecspresso と lambroll は `--envfile` でこれを読み、定義内の `{{ must_env `IMAGE` }}` / `{{ must_env `IMAGE_NGINX` }}` に入る。Cloud Run は `.env` を読み込んでから `service.yaml` を `envsubst` する。方式が違っても「イメージを更新する」操作は `.env` の行の書き換えで済む。
 - **イメージの更新はリポジトリ一致で行う**: `scripts/set-image.sh <service> <env> <image>...` は、渡されたイメージと同じリポジトリ (registry/repository) を値に持つ変数をすべて書き換える。アプリ側 CI は自分がビルドしたイメージを渡すだけでよく、別リポジトリ由来のサイドカーには触れない。該当する変数がなければエラーになる。
 - **認証先だけ GitHub Environments に置く**: 環境ごとに 1 つのデプロイ用ロール (AWS) / サービスアカウント (GCP)。OIDC の `sub` 条件を `environment:<env>` に絞れる。
@@ -57,10 +57,11 @@ flowchart LR
 │   └── render.sh                        # 定義をツールに読ませて確認 (CI / ローカル)
 └── .github/
     ├── CODEOWNERS                       # services/*/prd/ のレビュー必須化
-    ├── actions/deploy-{ecs,lambda,cloudrun}/
     └── workflows/
-        ├── release.yml                  # main push: 変更のあった services/名/環境 をすべて適用
-        ├── deploy.yml                   # 再利用: 1 サービス × 1 環境
+        ├── release.yml                  # main push: 変更のあった services/名/環境 を方式ごとに振り分けて適用
+        ├── deploy-ecs.yml               # 再利用: ECS (ecspresso, AWS OIDC)
+        ├── deploy-lambda.yml            # 再利用: Lambda (lambroll, AWS OIDC)
+        ├── deploy-cloudrun.yml          # 再利用: Cloud Run (gcloud, GCP Workload Identity)
         └── ci.yml                       # PR: 全サービス × 全環境の render
 ```
 
@@ -82,7 +83,7 @@ flowchart LR
 | `function.json` | [lambroll](https://github.com/fujiwara/lambroll) | AWS OIDC | `--envfile .env` で `diff` → `deploy` (コンテナイメージ。新バージョンを publish してエイリアスを付け替え) |
 | `service.yaml` | gcloud | GCP Workload Identity | `.env` を読んで `envsubst` → `gcloud run services replace` (新リビジョンが Ready になるまで待機) |
 
-新しい方式を足すときは `.github/actions/deploy-<kind>/action.yml` を追加し、`scripts/kind.sh` と `deploy.yml` に分岐を 1 つずつ足します。
+方式ごとにワークフローが独立しているので、認証やツールの都合は各ファイルに閉じます。新しい方式を足すときは `deploy-<kind>.yml` を追加し、`scripts/kind.sh` に判定を、`release.yml` に呼び出しジョブを 1 つずつ足します。
 
 ## サービスや環境を追加する
 

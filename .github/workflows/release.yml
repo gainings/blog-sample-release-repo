@@ -1,6 +1,7 @@
 # main にあるものをリリースする。
 #
 # - push (main): そのコミットで変更があった services/<service>/<env>/ をすべて適用する (並列)。
+#   デプロイ方式 (ecs / lambda / cloudrun) ごとに専用の再利用ワークフロー deploy-<kind>.yml を呼ぶ。
 #   環境ごとの順序付けはしない。「いつ main に入るか」がそのまま「いつ適用されるか」になる
 #   (dev / stg はアプリ側の auto-merge で即時、prd はタグ作成時に作られる PR の手動マージで)。
 # - workflow_dispatch: 引数なし。main の全サービス・全環境を再適用する (差分がなければ各ツールが no-op に近い)。
@@ -18,14 +19,18 @@ on:
 permissions: {}
 
 # ワークフロー全体の concurrency は付けない (pending は 1 つしか保持されず、連続マージ時に取りこぼすため)。
-# 同じ対象 (service × env) の直列化は deploy.yml 側の concurrency で行う。
+# 同じ対象 (service × env) の直列化は deploy-<kind>.yml 側の concurrency で行う。
 jobs:
   changes:
     name: detect changed environments
     runs-on: ubuntu-latest
     outputs:
-      matrix: ${{ steps.c.outputs.matrix }}
-      count: ${{ steps.c.outputs.count }}
+      ecs: ${{ steps.c.outputs.ecs }}
+      ecs_count: ${{ steps.c.outputs.ecs_count }}
+      lambda: ${{ steps.c.outputs.lambda }}
+      lambda_count: ${{ steps.c.outputs.lambda_count }}
+      cloudrun: ${{ steps.c.outputs.cloudrun }}
+      cloudrun_count: ${{ steps.c.outputs.cloudrun_count }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -46,13 +51,24 @@ jobs:
           # 削除された環境は対象外
           dirs=$(for d in $dirs; do [ -d "$d" ] && echo "$d" || true; done)
 
-          matrix=$(echo "$dirs" | awk -F/ 'NF == 3 { print $2, $3 }' \
-            | while read -r svc env; do jq -n --arg service "$svc" --arg env "$env" '{service: $service, env: $env}'; done \
-            | jq -cs '{include: .}')
-          count=$(echo "$matrix" | jq '.include | length')
-          echo "matrix=${matrix}" >> "$GITHUB_OUTPUT"
-          echo "count=${count}" >> "$GITHUB_OUTPUT"
-          echo "targets (${count}):"; echo "${dirs:-  (none)}"
+          # デプロイ方式ごとに matrix を作る (方式は scripts/kind.sh がディレクトリの中身から判定する)
+          ecs='[]'; lambda='[]'; cloudrun='[]'
+          for d in $dirs; do
+            svc=$(basename "$(dirname "$d")"); env=$(basename "$d")
+            kind=$(scripts/kind.sh "$d")
+            item=$(jq -cn --arg service "$svc" --arg env "$env" '{service: $service, env: $env}')
+            case "$kind" in
+              ecs)      ecs=$(jq -c ". + [$item]" <<<"$ecs") ;;
+              lambda)   lambda=$(jq -c ". + [$item]" <<<"$lambda") ;;
+              cloudrun) cloudrun=$(jq -c ". + [$item]" <<<"$cloudrun") ;;
+            esac
+            echo "  ${d} (${kind})"
+          done
+          for k in ecs lambda cloudrun; do
+            list=${!k}
+            echo "${k}={\"include\":${list}}" >> "$GITHUB_OUTPUT"
+            echo "${k}_count=$(jq 'length' <<<"$list")" >> "$GITHUB_OUTPUT"
+          done
           {
             echo "## Release ${GITHUB_SHA::7}"
             echo '```'
@@ -60,16 +76,44 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-  deploy:
+  deploy-ecs:
     needs: changes
-    if: needs.changes.outputs.count != '0'
+    if: needs.changes.outputs.ecs_count != '0'
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
+      matrix: ${{ fromJSON(needs.changes.outputs.ecs) }}
     permissions:
       id-token: write
       contents: read
-    uses: ./.github/workflows/deploy.yml
+    uses: ./.github/workflows/deploy-ecs.yml
+    with:
+      service: ${{ matrix.service }}
+      environment: ${{ matrix.env }}
+
+  deploy-lambda:
+    needs: changes
+    if: needs.changes.outputs.lambda_count != '0'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.changes.outputs.lambda) }}
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/deploy-lambda.yml
+    with:
+      service: ${{ matrix.service }}
+      environment: ${{ matrix.env }}
+
+  deploy-cloudrun:
+    needs: changes
+    if: needs.changes.outputs.cloudrun_count != '0'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.changes.outputs.cloudrun) }}
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/deploy-cloudrun.yml
     with:
       service: ${{ matrix.service }}
       environment: ${{ matrix.env }}
