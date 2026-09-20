@@ -40,6 +40,6 @@ if cmp -s "$f" "$work"; then
   echo "${f}: no changes"
   exit 0
 fi
-diff "$f" "$work" | sed -n 's/^> /  /p'
+{ diff "$f" "$work" || true; } | sed -n 's/^> /  /p'
 cat "$work" > "$f"
 echo "${f}: updated"
