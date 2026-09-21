@@ -9,7 +9,7 @@
 
 ## 考え方
 
-- **パスが宣言**: `<サービス>/<環境>/<方式>/` の 3 階層。第一階層はアプリのリポジトリ名 (アプリ側 CI が `github.event.repository.name` で参照する)、第二階層は環境、第三階層 (`ecs` / `lambda` / `cloudrun`) がデプロイ方式の宣言。`release.yml` は方式ディレクトリの名前で振り分けるだけで、ファイルの有無や独自マニフェストから方式を推測することはしない。
+- **パスが宣言**: `<サービス>/<環境>/<方式>/` の 3 階層。第一階層はアプリケーション名 (アプリ側 CI が `APP_NAME` で明示する)、第二階層は環境、第三階層 (`ecs` / `lambda` / `cloudrun`) がデプロイ方式の宣言。`release.yml` は方式ディレクトリの名前で振り分けるだけで、ファイルの有無や独自マニフェストから方式を推測することはしない。
 - **環境ディレクトリにはイメージ一覧と定義の実体だけ**: `<サービス>/<環境>/.env` にその環境のイメージを置き、`<サービス>/<環境>/<方式>/` にツールのネイティブな定義ファイルを置く。1 つのサービスが ECS と Lambda の両方を持っても、イメージの更新先は `.env` 1 つ。
 - **方式ごとに独立したワークフロー**: `deploy-ecs.yml` / `deploy-lambda.yml` / `deploy-cloudrun.yml`。認証 (AWS OIDC / GCP Workload Identity) もその中に閉じている。
 - **イメージは `<サービス>/<環境>/.env` に書いてある**: `IMAGE=registry/repo:tag` の形の行。サイドカーがあれば `IMAGE_NGINX=...` のように行を増やす (変数名は自由)。ecspresso と lambroll は `--envfile` でこれを読み、定義内の `{{ must_env `IMAGE` }}` / `{{ must_env `IMAGE_NGINX` }}` に入る。Cloud Run は `.env` を読み込んでから `service.yaml` を `envsubst` する。方式が違っても「イメージを更新する」操作は `.env` の行の書き換えで済む。
@@ -38,7 +38,7 @@ flowchart LR
 
 ```
 .
-├── blog-sample-app-repo1/                 # アプリのリポジトリ名と同じ
+├── blog-sample-app/                       # アプリケーション名 (アプリ側 CI が APP_NAME で指定する)
 │   ├── dev/
 │   │   ├── .env                         # IMAGE=..., IMAGE_NGINX=... (この環境のイメージ一覧)
 │   │   └── ecs/                         # ← 方式の宣言
@@ -125,8 +125,8 @@ AWS の OIDC なら `sub` を `repo:gainings/blog-sample-release-repo:environmen
 ## ローカルでの確認
 
 ```sh
-scripts/render.sh blog-sample-app-repo1/dev/ecs
-scripts/set-image.sh blog-sample-app-repo1/dev \
+scripts/render.sh blog-sample-app/dev/ecs
+scripts/set-image.sh blog-sample-app/dev \
   111111111111.dkr.ecr.ap-northeast-1.amazonaws.com/blog-sample-app:sha-abc123 \
   111111111111.dkr.ecr.ap-northeast-1.amazonaws.com/blog-sample-app-nginx:sha-abc123
 git diff   # dev/.env の IMAGE と IMAGE_NGINX が変わる
