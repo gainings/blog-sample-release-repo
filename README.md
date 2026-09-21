@@ -118,9 +118,17 @@ AWS の OIDC なら `sub` を `repo:gainings/blog-sample-release-repo:environmen
 
 クラウドを用意せずに流れだけ確認したい場合は、Environment の variable に `DRY_RUN=true` を設定します。認証もデプロイもせず、定義のレンダリングだけを行って成功します (ログとサマリーに DRY RUN と明記されます)。
 
-**ブランチ保護 (main)**: "Require review from Code Owners" を有効にすると `*/prd/` の変更にレビューが必須になります。dev / stg の PR を本当に auto-merge にするには、リポジトリ設定で "Allow auto-merge" を有効にし、`render` チェックを必須にします (未設定の場合、アプリ側 CI は即時マージにフォールバックします)。
+**ブランチ保護 (main)**: ruleset で PR 必須、squash のみ、必須チェック `ci-ok`、CODEOWNERS (`*/prd/`) の承認必須、バイパスなし。"Allow auto-merge" を有効にしておくと、`Propose release` の auto-merge が `ci-ok` 通過後にマージされます。
 
-**GitHub App**: アプリリポジトリが PR を作るための GitHub App をこのリポジトリにもインストールします (Contents / Pull requests: Read and write)。
+**GitHub App**: 3 つの App を役割ごとに分けます。
+
+| App | 権限 | インストール先 | 鍵の置き場所 | 用途 |
+|---|---|---|---|---|
+| リリース用 (`GH_APP_ID` / `GH_APP_PRIVATE_KEY`) | Contents / Pull requests: Read and write | このリポジトリ | このリポジトリ | `Propose release` が `.env` を書き換えた PR を作る |
+| 要求用 | Actions: Read and write | このリポジトリ | 各アプリリポジトリ | アプリ側 CI が `Propose release` を起動する |
+| tagpr 用 | Contents / Pull requests: Read and write | 各アプリリポジトリ | 各アプリリポジトリ | アプリ側の tagpr がリリース PR とタグを作る |
+
+このリポジトリの内容を書ける鍵はこのリポジトリにしかなく、アプリリポジトリが持つ鍵ではワークフローの起動しかできません。加えて main の ruleset (PR 必須、`ci-ok` 必須、`*/prd/` は CODEOWNERS の承認必須、バイパスなし) により、鍵が漏れても main へ直接 push はできません。
 
 ## ローカルでの確認
 
