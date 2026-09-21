@@ -18,8 +18,8 @@ jobs:
         run: |
           set -euo pipefail
           matrix=$(
-            find services -mindepth 2 -maxdepth 2 -type d | sort | while IFS=/ read -r _ svc env; do
-              jq -n --arg service "$svc" --arg env "$env" '{service: $service, env: $env}'
+            find ecs lambda cloudrun -mindepth 2 -maxdepth 2 -type d 2>/dev/null | sort | while read -r d; do
+              jq -n --arg dir "$d" '{dir: $dir}'
             done | jq -cs '{include: .}'
           )
           echo "matrix=${matrix}" >> "$GITHUB_OUTPUT"
@@ -31,7 +31,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
-    name: render ${{ matrix.service }} (${{ matrix.env }})
+    name: render ${{ matrix.dir }}
     steps:
       - uses: actions/checkout@v4
       - uses: kayac/ecspresso@v2
@@ -40,4 +40,4 @@ jobs:
       - uses: fujiwara/lambroll@v1
         with:
           version: v1.5.3
-      - run: scripts/render.sh "${{ matrix.service }}" "${{ matrix.env }}"
+      - run: scripts/render.sh "${{ matrix.dir }}"

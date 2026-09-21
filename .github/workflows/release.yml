@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     branches: [main]
-    paths: [services/**]
+    paths: [ecs/**, lambda/**, cloudrun/**]
   workflow_dispatch:
 
 permissions: {}
@@ -31,24 +31,23 @@ jobs:
           set -euo pipefail
           if [ "$EVENT" = "workflow_dispatch" ] || [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BEFORE" 2>/dev/null; then
             echo "full sync: all environments"
-            dirs=$(find services -mindepth 2 -maxdepth 2 -type d | sort)
+            dirs=$(find ecs lambda cloudrun -mindepth 2 -maxdepth 2 -type d 2>/dev/null | sort)
           else
-            dirs=$(git diff --name-only "$BEFORE" "$GITHUB_SHA" -- services/ \
+            dirs=$(git diff --name-only "$BEFORE" "$GITHUB_SHA" -- ecs/ lambda/ cloudrun/ \
               | awk -F/ 'NF >= 4 { print $1"/"$2"/"$3 }' | sort -u)
           fi
           dirs=$(for d in $dirs; do [ -d "$d" ] && echo "$d" || true; done)
 
           ecs='[]'; lambda='[]'; cloudrun='[]'
           for d in $dirs; do
-            svc=$(basename "$(dirname "$d")"); env=$(basename "$d")
-            kind=$(scripts/kind.sh "$d")
-            item=$(jq -cn --arg service "$svc" --arg env "$env" '{service: $service, env: $env}')
+            kind="${d%%/*}"; env="${d##*/}"
+            item=$(jq -cn --arg dir "$d" --arg env "$env" '{dir: $dir, env: $env}')
             case "$kind" in
               ecs)      ecs=$(jq -c ". + [$item]" <<<"$ecs") ;;
               lambda)   lambda=$(jq -c ". + [$item]" <<<"$lambda") ;;
               cloudrun) cloudrun=$(jq -c ". + [$item]" <<<"$cloudrun") ;;
             esac
-            echo "  ${d} (${kind})"
+            echo "  ${d}"
           done
           for k in ecs lambda cloudrun; do
             list=${!k}
@@ -58,7 +57,7 @@ jobs:
           {
             echo "## Release ${GITHUB_SHA::7}"
             echo '```'
-            echo "${dirs:-(no changes under services/)}"
+            echo "${dirs:-(no changes)}"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -73,7 +72,7 @@ jobs:
       contents: read
     uses: ./.github/workflows/deploy-ecs.yml
     with:
-      service: ${{ matrix.service }}
+      dir: ${{ matrix.dir }}
       environment: ${{ matrix.env }}
 
   deploy-lambda:
@@ -87,7 +86,7 @@ jobs:
       contents: read
     uses: ./.github/workflows/deploy-lambda.yml
     with:
-      service: ${{ matrix.service }}
+      dir: ${{ matrix.dir }}
       environment: ${{ matrix.env }}
 
   deploy-cloudrun:
@@ -101,5 +100,5 @@ jobs:
       contents: read
     uses: ./.github/workflows/deploy-cloudrun.yml
     with:
-      service: ${{ matrix.service }}
+      dir: ${{ matrix.dir }}
       environment: ${{ matrix.env }}

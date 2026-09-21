@@ -3,7 +3,7 @@ name: Deploy Lambda (reusable)
 on:
   workflow_call:
     inputs:
-      service:
+      dir:
         required: true
         type: string
       environment:
@@ -12,17 +12,17 @@ on:
 
 jobs:
   deploy:
-    name: ${{ inputs.service }} → ${{ inputs.environment }}
+    name: ${{ inputs.dir }}
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
     concurrency:
-      group: deploy-${{ inputs.service }}-${{ inputs.environment }}
+      group: deploy-${{ inputs.dir }}
       cancel-in-progress: false
     permissions:
       id-token: write
       contents: read
     env:
-      DIR: services/${{ inputs.service }}/${{ inputs.environment }}
+      DIR: ${{ inputs.dir }}
     steps:
       - uses: actions/checkout@v4
 
@@ -33,7 +33,7 @@ jobs:
             [ -f "$DIR/$f" ] || { echo "::error::${DIR}/${f} not found"; exit 1; }
           done
           {
-            echo "### ${{ inputs.service }} → ${{ inputs.environment }} (lambda)${{ vars.DRY_RUN == 'true' && ' — DRY RUN, not deployed' || '' }}"
+            echo "### ${{ inputs.dir }}${{ vars.DRY_RUN == 'true' && ' — DRY RUN, not deployed' || '' }}"
             echo '```'; grep -v '^#' "$DIR/.env"; echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -45,7 +45,7 @@ jobs:
         if: vars.DRY_RUN == 'true'
         run: |
           echo "::warning::DRY_RUN is set on environment '${{ inputs.environment }}': rendering only, nothing is deployed"
-          scripts/render.sh "${{ inputs.service }}" "${{ inputs.environment }}"
+          scripts/render.sh "$DIR"
 
       - name: Check credentials
         if: vars.DRY_RUN != 'true'

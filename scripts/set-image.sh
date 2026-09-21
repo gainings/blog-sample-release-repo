@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
-service="${1:?usage: $0 <service> <env> <image>...}"
-env_name="${2:?usage: $0 <service> <env> <image>...}"
-shift 2
-[ "$#" -ge 1 ] || { echo "usage: $0 <service> <env> <image>..." >&2; exit 1; }
-f="services/${service}/${env_name}/.env"
+dir="${1:?usage: $0 <kind>/<service>/<env> <image>...}"
+shift
+[ "$#" -ge 1 ] || { echo "usage: $0 <kind>/<service>/<env> <image>..." >&2; exit 1; }
+f="${dir}/.env"
 [ -f "$f" ] || { echo "no such environment: ${f}" >&2; exit 1; }
 
 work=$(mktemp); next=$(mktemp); trap 'rm -f "$work" "$next"' EXIT
