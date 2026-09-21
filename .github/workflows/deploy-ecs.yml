@@ -23,18 +23,18 @@ jobs:
       contents: read
     env:
       DIR: ${{ inputs.dir }}
+      ENVFILE: ${{ inputs.dir }}/../.env
     steps:
       - uses: actions/checkout@v4
 
       - name: Check definitions
         run: |
           set -euo pipefail
-          for f in ecspresso.yml .env; do
-            [ -f "$DIR/$f" ] || { echo "::error::${DIR}/${f} not found"; exit 1; }
-          done
+          [ -f "$DIR/ecspresso.yml" ] || { echo "::error::${DIR}/ecspresso.yml not found"; exit 1; }
+          [ -f "$ENVFILE" ] || { echo "::error::${ENVFILE} not found"; exit 1; }
           {
             echo "### ${{ inputs.dir }}${{ vars.DRY_RUN == 'true' && ' — DRY RUN, not deployed' || '' }}"
-            echo '```'; grep -v '^#' "$DIR/.env"; echo '```'
+            echo '```'; grep -v '^#' "$ENVFILE"; echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: kayac/ecspresso@v2
@@ -67,7 +67,7 @@ jobs:
         if: vars.DRY_RUN != 'true'
         run: |
           set -euo pipefail
-          e() { ecspresso --envfile "$DIR/.env" --config "$DIR/ecspresso.yml" "$@"; }
+          e() { ecspresso --envfile "$ENVFILE" --config "$DIR/ecspresso.yml" "$@"; }
           e verify
           e diff || true
           e deploy

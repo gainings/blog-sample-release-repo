@@ -23,18 +23,18 @@ jobs:
       contents: read
     env:
       DIR: ${{ inputs.dir }}
+      ENVFILE: ${{ inputs.dir }}/../.env
     steps:
       - uses: actions/checkout@v4
 
       - name: Check definitions
         run: |
           set -euo pipefail
-          for f in function.json .env; do
-            [ -f "$DIR/$f" ] || { echo "::error::${DIR}/${f} not found"; exit 1; }
-          done
+          [ -f "$DIR/function.json" ] || { echo "::error::${DIR}/function.json not found"; exit 1; }
+          [ -f "$ENVFILE" ] || { echo "::error::${ENVFILE} not found"; exit 1; }
           {
             echo "### ${{ inputs.dir }}${{ vars.DRY_RUN == 'true' && ' — DRY RUN, not deployed' || '' }}"
-            echo '```'; grep -v '^#' "$DIR/.env"; echo '```'
+            echo '```'; grep -v '^#' "$ENVFILE"; echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: fujiwara/lambroll@v1
@@ -67,6 +67,6 @@ jobs:
         if: vars.DRY_RUN != 'true'
         run: |
           set -euo pipefail
-          l() { lambroll --envfile "$DIR/.env" "$@" --function "$DIR/function.json"; }
+          l() { lambroll --envfile "$ENVFILE" "$@" --function "$DIR/function.json"; }
           l diff || true
           l deploy

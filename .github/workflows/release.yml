@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     branches: [main]
-    paths: [ecs/**, lambda/**, cloudrun/**]
+    paths-ignore: ['.github/**', 'scripts/**', '*.md']
   workflow_dispatch:
 
 permissions: {}
@@ -29,18 +29,28 @@ jobs:
           EVENT: ${{ github.event_name }}
         run: |
           set -euo pipefail
+          all_targets() {
+            find . -mindepth 3 -maxdepth 3 -type d \( -name ecs -o -name lambda -o -name cloudrun \) -not -path './.git*' | sed 's#^\./##' | sort
+          }
           if [ "$EVENT" = "workflow_dispatch" ] || [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BEFORE" 2>/dev/null; then
             echo "full sync: all environments"
-            dirs=$(find ecs lambda cloudrun -mindepth 2 -maxdepth 2 -type d 2>/dev/null | sort)
+            dirs=$(all_targets)
           else
-            dirs=$(git diff --name-only "$BEFORE" "$GITHUB_SHA" -- ecs/ lambda/ cloudrun/ \
-              | awk -F/ 'NF >= 4 { print $1"/"$2"/"$3 }' | sort -u)
+            changed=$(git diff --name-only "$BEFORE" "$GITHUB_SHA" -- . ':!.github' ':!scripts' ':!*.md')
+            dirs=$(
+              {
+                echo "$changed" | awk -F/ 'NF >= 4 && ($3 == "ecs" || $3 == "lambda" || $3 == "cloudrun") { print $1"/"$2"/"$3 }'
+                for envdir in $(echo "$changed" | awk -F/ 'NF == 3 && $3 == ".env" { print $1"/"$2 }' | sort -u); do
+                  find "$envdir" -mindepth 1 -maxdepth 1 -type d \( -name ecs -o -name lambda -o -name cloudrun \) 2>/dev/null
+                done
+              } | sort -u
+            )
           fi
           dirs=$(for d in $dirs; do [ -d "$d" ] && echo "$d" || true; done)
 
           ecs='[]'; lambda='[]'; cloudrun='[]'
           for d in $dirs; do
-            kind="${d%%/*}"; env="${d##*/}"
+            kind="${d##*/}"; env=$(basename "$(dirname "$d")")
             item=$(jq -cn --arg dir "$d" --arg env "$env" '{dir: $dir, env: $env}')
             case "$kind" in
               ecs)      ecs=$(jq -c ". + [$item]" <<<"$ecs") ;;

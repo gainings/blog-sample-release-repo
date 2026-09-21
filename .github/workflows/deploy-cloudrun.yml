@@ -23,24 +23,24 @@ jobs:
       contents: read
     env:
       DIR: ${{ inputs.dir }}
+      ENVFILE: ${{ inputs.dir }}/../.env
     steps:
       - uses: actions/checkout@v4
 
       - name: Check definitions
         run: |
           set -euo pipefail
-          for f in service.yaml .env; do
-            [ -f "$DIR/$f" ] || { echo "::error::${DIR}/${f} not found"; exit 1; }
-          done
+          [ -f "$DIR/service.yaml" ] || { echo "::error::${DIR}/service.yaml not found"; exit 1; }
+          [ -f "$ENVFILE" ] || { echo "::error::${ENVFILE} not found"; exit 1; }
           {
             echo "### ${{ inputs.dir }}${{ vars.DRY_RUN == 'true' && ' — DRY RUN, not deployed' || '' }}"
-            echo '```'; grep -v '^#' "$DIR/.env"; echo '```'
+            echo '```'; grep -v '^#' "$ENVFILE"; echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Render service.yaml
         run: |
           set -euo pipefail
-          set -a; . "$DIR/.env"; set +a
+          set -a; . "$ENVFILE"; set +a
           envsubst < "$DIR/service.yaml" > "$RUNNER_TEMP/service.yaml"
           cat "$RUNNER_TEMP/service.yaml"
 

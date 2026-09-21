@@ -18,7 +18,7 @@ jobs:
         run: |
           set -euo pipefail
           matrix=$(
-            find ecs lambda cloudrun -mindepth 2 -maxdepth 2 -type d 2>/dev/null | sort | while read -r d; do
+            find . -mindepth 3 -maxdepth 3 -type d \( -name ecs -o -name lambda -o -name cloudrun \) -not -path './.git*' | sed 's#^\./##' | sort | while read -r d; do
               jq -n --arg dir "$d" '{dir: $dir}'
             done | jq -cs '{include: .}'
           )
