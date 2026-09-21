@@ -1,13 +1,3 @@
-# main にあるものをリリースする。
-#
-# - push (main): そのコミットで変更があった services/<service>/<env>/ をすべて適用する (並列)。
-#   デプロイ方式 (ecs / lambda / cloudrun) ごとに専用の再利用ワークフロー deploy-<kind>.yml を呼ぶ。
-#   環境ごとの順序付けはしない。「いつ main に入るか」がそのまま「いつ適用されるか」になる
-#   (dev / stg はアプリ側の auto-merge で即時、prd はタグ作成時に作られる PR の手動マージで)。
-# - workflow_dispatch: 引数なし。main の全サービス・全環境を再適用する (差分がなければ各ツールが no-op に近い)。
-#
-# 入力は持たない。「何をどこに出すか」はすべてリポジトリの内容 (= main) で決まる。
-# ロールバックは対象コミットを git revert して main にマージする。
 name: Release
 
 on:
@@ -18,8 +8,6 @@ on:
 
 permissions: {}
 
-# ワークフロー全体の concurrency は付けない (pending は 1 つしか保持されず、連続マージ時に取りこぼすため)。
-# 同じ対象 (service × env) の直列化は deploy-<kind>.yml 側の concurrency で行う。
 jobs:
   changes:
     name: detect changed environments
@@ -48,10 +36,8 @@ jobs:
             dirs=$(git diff --name-only "$BEFORE" "$GITHUB_SHA" -- services/ \
               | awk -F/ 'NF >= 4 { print $1"/"$2"/"$3 }' | sort -u)
           fi
-          # 削除された環境は対象外
           dirs=$(for d in $dirs; do [ -d "$d" ] && echo "$d" || true; done)
 
-          # デプロイ方式ごとに matrix を作る (方式は scripts/kind.sh がディレクトリの中身から判定する)
           ecs='[]'; lambda='[]'; cloudrun='[]'
           for d in $dirs; do
             svc=$(basename "$(dirname "$d")"); env=$(basename "$d")

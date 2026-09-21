@@ -1,12 +1,4 @@
 #!/usr/bin/env bash
-# 環境ディレクトリの .env にあるイメージを差し替える。アプリリポジトリの CI がこのスクリプトを呼んで PR を作る。
-#
-#   scripts/set-image.sh <service> <env> <registry/repository:tag> [<registry/repository:tag> ...]
-#
-# .env の中で「値が同じリポジトリ (registry/repository) を指している変数」をすべて書き換える。
-# 変数名は問わない (IMAGE, IMAGE_NGINX, IMAGE_LOG_ROUTER など)。サイドカーのように 1 つの環境に複数の
-# イメージがあっても、呼び出し側は自分がビルドしたイメージを渡すだけでよく、他のイメージには触れない。
-# 渡したイメージのリポジトリを参照する変数が 1 つもなければエラーにする (別サービスへの誤投入を防ぐ)。
 set -euo pipefail
 service="${1:?usage: $0 <service> <env> <image>...}"
 env_name="${2:?usage: $0 <service> <env> <image>...}"

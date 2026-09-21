@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# 環境ディレクトリに置かれた定義ファイルからデプロイ方式を判定する。
-#   scripts/kind.sh services/<service>/<env>   → ecs | lambda | cloudrun
 set -euo pipefail
 dir="${1:?usage: $0 <dir>}"
 found=()

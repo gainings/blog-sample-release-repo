@@ -1,6 +1,3 @@
-# ECS へのデプロイ (ecspresso)。services/<service>/<env>/ に ecspresso.yml がある対象に使う。
-# 認証先は GitHub Environment (<env>) の variables: AWS_ROLE_ARN, AWS_REGION
-# DRY_RUN=true が設定されていれば、認証もデプロイもせず定義のレンダリングだけ行う。
 name: Deploy ECS (reusable)
 
 on:
@@ -71,9 +68,6 @@ jobs:
         run: |
           set -euo pipefail
           e() { ecspresso --envfile "$DIR/.env" --config "$DIR/ecspresso.yml" "$@"; }
-          # イメージの存在、IAM ロール、ロググループ等を事前検証する
           e verify
-          # 現在のタスク定義/サービスとの差分をログに残す
           e diff || true
-          # サービスが安定するまで待つ。失敗時はサーキットブレーカーが前リビジョンへ戻す
           e deploy
