@@ -41,3 +41,10 @@ jobs:
         with:
           version: v1.5.3
       - run: scripts/render.sh "${{ matrix.dir }}"
+
+  ci-ok:
+    needs: render
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: '[ "${{ needs.render.result }}" = "success" ]'

@@ -1,0 +1,104 @@
+name: Propose release
+
+run-name: "propose ${{ inputs.app }} ${{ inputs.environment }} ${{ inputs.images }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      app:
+        required: true
+        type: string
+      environment:
+        required: true
+        type: choice
+        options: [dev, stg, prd]
+      images:
+        description: "registry/repository:tag (comma separated)"
+        required: true
+        type: string
+      auto_merge:
+        required: false
+        type: boolean
+        default: false
+      source:
+        description: "URL of the triggering run (informational)"
+        required: false
+        type: string
+        default: ""
+
+permissions: {}
+
+concurrency:
+  group: propose-${{ inputs.app }}-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  propose:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Validate inputs
+        env:
+          APP: ${{ inputs.app }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          IMAGES: ${{ inputs.images }}
+        run: |
+          set -euo pipefail
+          [[ "$APP" =~ ^[a-z0-9][a-z0-9-]*$ ]] || { echo "::error::invalid app name '${APP}'"; exit 1; }
+          IFS=',' read -ra images <<<"$IMAGES"
+          for img in "${images[@]}"; do
+            img="${img// /}"
+            [[ "$img" =~ ^[a-z0-9.:/-]+/[a-z0-9._/-]+:[A-Za-z0-9._-]+$ ]] || { echo "::error::invalid image reference '${img}'"; exit 1; }
+            tag="${img##*:}"
+            case "$ENVIRONMENT" in
+              dev) [[ "$tag" =~ ^(sha-[0-9a-f]{40}|v[0-9]{4}\.[0-9]{4}\.[0-9]+)$ ]] ;;
+              stg|prd) [[ "$tag" =~ ^v[0-9]{4}\.[0-9]{4}\.[0-9]+$ ]] ;;
+            esac || { echo "::error::tag '${tag}' is not allowed for ${ENVIRONMENT}"; exit 1; }
+          done
+
+      - uses: actions/create-github-app-token@v2
+        id: app-token
+        with:
+          app-id: ${{ vars.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Update .env and open PR
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          BOT: ${{ steps.app-token.outputs.app-slug }}[bot]
+          APP: ${{ inputs.app }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          IMAGES: ${{ inputs.images }}
+          AUTO_MERGE: ${{ inputs.auto_merge }}
+          SOURCE: ${{ inputs.source }}
+        run: |
+          set -euo pipefail
+          dir="${APP}/${ENVIRONMENT}"
+          [ -f "${dir}/.env" ] || { echo "::error::${dir}/.env not found"; exit 1; }
+          IFS=',' read -ra images <<<"${IMAGES// /}"
+          scripts/set-image.sh "$dir" "${images[@]}"
+          if git diff --quiet; then
+            echo "${dir}: already up to date"
+            exit 0
+          fi
+
+          tag="${images[0]##*:}"
+          title="Release ${APP} ${tag} to ${ENVIRONMENT}"
+          branch="release/${APP}/${ENVIRONMENT}/${tag}"
+          git config user.name "$BOT"
+          git config user.email "${BOT}@users.noreply.github.com"
+          git checkout -b "$branch"
+          git commit -am "$title"
+          git push -u origin "$branch"
+          body=$(printf 'Images:\n%s\n\nRequested by: %s' "$(printf -- '- `%s`\n' "${images[@]}")" "${SOURCE:-manual}")
+          url=$(gh pr create --base main --head "$branch" --title "$title" --body "$body")
+          echo "PR: ${url}"
+          echo "- ${url}" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$AUTO_MERGE" = "true" ]; then
+            gh pr merge "${url##*/}" --squash --auto --delete-branch
+          fi
