@@ -47,10 +47,10 @@ flowchart LR
 │   │       └── ecs-service-def.json
 │   ├── stg/ …
 │   └── prd/ …
-├── example-lambda/                      # 例
+├── example-lambda-app/                  # 例
 │   ├── dev/{.env, lambda/function.json}
 │   └── prd/{.env, lambda/function.json}
-├── example-cloudrun/                    # 例
+├── example-cloudrun-app/                # 例
 │   ├── dev/{.env, cloudrun/service.yaml}
 │   └── prd/{.env, cloudrun/service.yaml}
 ├── scripts/
